@@ -2,8 +2,12 @@ import React, { useState } from 'react';
 import { Sparkles, User, Lock, ArrowRight, Loader2, AlertCircle, Camera, Zap, LogIn } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../lib/utils';
+import api, { parseAuthResponse } from '../lib/api';
+import { useAuth } from '../components/AuthProvider';
+import { toast } from 'sonner';
 
 export const Auth: React.FC = () => {
+  const { login } = useAuth();
   const [isLogin, setIsLogin] = useState(true);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -13,56 +17,62 @@ export const Auth: React.FC = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
-    setLoading(true);
 
-    // Hardcoded credentials logic
-    let targetRole: 'admin' | 'owner' | null = null;
-    let displayName = '';
-
-    if (email === 'superadmin@gmail.com' && password === '123') {
-      targetRole = 'admin';
-      displayName = 'Super Admin';
-    } else if (email === 'admin@gmail.com' && password === '125') {
-      targetRole = 'owner';
-      displayName = 'Admin Mitra';
-    }
-
-    if (targetRole) {
-      const mockSession = {
-        user: {
-          uid: targetRole === 'admin' ? 'super-admin-id' : 'mitra-admin-id',
-          email: email,
-          displayName: displayName,
-          photoURL: `https://api.dicebear.com/7.x/avataaars/svg?seed=${email}`,
-        },
-        role: targetRole
-      };
-      
-      localStorage.setItem('unismiles_mock_session', JSON.stringify(mockSession));
-      
-      setTimeout(() => {
-        window.location.reload();
-      }, 1000);
+    if (!email.trim() || !password) {
+      setError('Mohon masukkan email dan password.');
       return;
     }
 
-    setTimeout(() => {
-      setError("Username atau password salah. Silakan coba lagi.");
+    if (!isLogin) {
+      setError('Pendaftaran akun publik dinonaktifkan demi keamanan. Silakan hubungi Super Admin untuk penambahan akun.');
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      const response = await api.post('/auth/login', {
+        email: email.trim(),
+        password,
+      });
+
+      const { token, user } = parseAuthResponse(response.data);
+      login(token, user);
+      toast.success('Login berhasil! Selamat datang kembali.');
+    } catch (err: any) {
+      console.error('Login request failed:', err?.message || 'Unknown network error');
+
+      if (!api.defaults.baseURL) {
+        setError('Konfigurasi API belum ditentukan. Silakan set VITE_API_BASE_URL pada file .env.local.');
+      } else if (!err.response) {
+        setError(`Gagal terhubung ke backend (${api.defaults.baseURL}). Pastikan server backend sedang aktif.`);
+      } else if (err.response.status === 400) {
+        setError('Format email atau password tidak valid.');
+      } else if (err.response.status === 401) {
+        setError('Email atau password salah. Silakan periksa kembali kredensial Anda.');
+      } else if (err.response.status === 403) {
+        setError('Akun Anda berstatus nonaktif. Silakan hubungi Super Admin.');
+      } else if (err.response.status === 429) {
+        setError('Terlalu banyak percobaan login gagal. Silakan tunggu beberapa saat.');
+      } else {
+        setError(err.response.data?.message || 'Terjadi kesalahan saat memproses login.');
+      }
+    } finally {
       setLoading(false);
-    }, 1000);
+    }
   };
 
   return (
     <div className="min-h-screen w-full flex overflow-hidden font-sans relative">
       {/* Background Gradient */}
-      <div 
-        className="absolute inset-0 z-0" 
-        style={{ background: 'linear-gradient(to bottom, #10172A, #223148)' }} 
+      <div
+        className="absolute inset-0 z-0"
+        style={{ background: 'linear-gradient(to bottom, #10172A, #223148)' }}
       />
 
       {/* Left Panel - Branding */}
       <div className="hidden lg:flex flex-1 relative flex-col justify-between p-16 overflow-hidden z-10">
-        <motion.div 
+        <motion.div
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
           className="flex items-center gap-3"
@@ -99,7 +109,7 @@ export const Auth: React.FC = () => {
 
       {/* Right Panel - Form Area */}
       <div className="flex-1 flex items-center justify-center p-8 relative z-10">
-        <motion.div 
+        <motion.div
           initial={{ opacity: 0, scale: 0.95 }}
           animate={{ opacity: 1, scale: 1 }}
           className="w-full max-w-md"

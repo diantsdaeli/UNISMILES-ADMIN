@@ -31,25 +31,36 @@ import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { cn } from './lib/utils';
 
 import { AuthProvider, useAuth, ErrorBoundary } from './components/AuthProvider';
-import { Toaster } from 'sonner';
+import { Toaster, toast } from 'sonner';
 
 import { TemplateProvider } from './TemplateContext';
 import { KioskProvider } from './KioskContext';
 import { SessionProvider } from './SessionContext';
 
+function SuperAdminRoute({ children }: { children: React.ReactNode }) {
+  const { isSuperAdmin } = useAuth();
+  if (!isSuperAdmin) {
+    toast.error('Akses Ditolak: Halaman ini hanya dapat diakses oleh Super Admin.');
+    return <Navigate to="/dashboard" replace />;
+  }
+  return <>{children}</>;
+}
+
 function AppContent() {
-  const { user, role, loading } = useAuth();
+  const { user, role, loading, isSuperAdmin, logout } = useAuth();
   const location = useLocation();
 
   const handleLogout = () => {
-    localStorage.removeItem('unismiles_mock_session');
-    window.location.reload();
+    logout();
   };
 
   if (loading) {
     return (
       <div className="h-screen flex items-center justify-center bg-[#10172A]">
-        <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin" />
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin" />
+          <p className="text-xs font-black uppercase tracking-widest text-primary/60">Memverifikasi Sesi...</p>
+        </div>
       </div>
     );
   }
@@ -60,7 +71,7 @@ function AppContent() {
 
   return (
     <div className="flex h-screen overflow-hidden">
-      <Sidebar role={role || 'owner'} />
+      <Sidebar role={role} />
       
       <main className="flex-1 flex flex-col overflow-hidden">
         {/* Top Header */}
@@ -88,19 +99,25 @@ function AppContent() {
             
             <div className="flex items-center gap-4 group cursor-pointer">
               <div className="text-right">
-                <p className="text-sm font-bold tracking-tight text-foreground group-hover:text-primary transition-colors">{user.displayName}</p>
+                <p className="text-sm font-bold tracking-tight text-foreground group-hover:text-primary transition-colors">
+                  {user.displayName || user.full_name || 'Admin'}
+                </p>
                 <p className="text-[10px] font-extrabold uppercase tracking-widest text-primary/60">
-                  {role === 'admin' ? 'Super Admin' : 'Admin Mitra'}
+                  {isSuperAdmin ? 'Super Admin' : (user.partner_name ? `Mitra: ${user.partner_name}` : 'Admin Mitra')}
                 </p>
               </div>
               <div className="relative group/avatar">
                 <button className="w-10 h-10 rounded-xl bg-white/5 border border-primary/30 flex items-center justify-center hover:bg-white/10 transition-all overflow-hidden shadow-lg">
-                  <img src={user.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.uid}`} alt="Avatar" className="w-full h-full object-cover" />
+                  <img 
+                    src={user.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.email || 'unismiles'}`} 
+                    alt="Avatar" 
+                    className="w-full h-full object-cover" 
+                  />
                 </button>
                 <div className="absolute right-0 top-full mt-3 w-48 glass-panel p-2 hidden group-hover/avatar:block animate-in fade-in slide-in-from-top-2 duration-200 border-primary/30 shadow-2xl">
                   <button 
                     onClick={handleLogout}
-                    className="w-full flex items-center gap-3 px-4 py-2.5 text-sm font-bold text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
+                    className="w-full flex items-center gap-3 px-4 py-2.5 text-sm font-bold text-red-400 hover:bg-red-500/10 rounded-lg transition-colors cursor-pointer"
                   >
                     <LogOut className="w-4 h-4" />
                     Logout
@@ -122,8 +139,22 @@ function AppContent() {
             <Route path="/storyboard" element={<Storyboard />} />
             <Route path="/sessions" element={<SessionRepository />} />
             <Route path="/kiosks" element={<KioskManager />} />
-            <Route path="/analytics" element={<Analytics />} />
-            <Route path="/users" element={<UserManager />} />
+            <Route 
+              path="/analytics" 
+              element={
+                <SuperAdminRoute>
+                  <Analytics />
+                </SuperAdminRoute>
+              } 
+            />
+            <Route 
+              path="/users" 
+              element={
+                <SuperAdminRoute>
+                  <UserManager />
+                </SuperAdminRoute>
+              } 
+            />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="*" element={<Navigate to="/dashboard" replace />} />
           </Routes>

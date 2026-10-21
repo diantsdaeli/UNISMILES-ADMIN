@@ -18,34 +18,37 @@ import {
 import { useNavigate, useLocation } from 'react-router-dom';
 import { motion } from 'motion/react';
 import { cn } from '../lib/utils';
+import { useAuth } from './AuthProvider';
 
 interface SidebarProps {
-  role: 'admin' | 'owner';
+  role?: string | null;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({ role }) => {
   const [collapsed, setCollapsed] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
+  const { logout } = useAuth();
+
+  const isSuperAdmin = role === 'Super Admin' || role === 'admin';
 
   const menuItems = [
-    { id: 'dashboard', path: '/dashboard', icon: LayoutDashboard, label: 'Dashboard', roles: ['admin', 'owner'] },
-    { id: 'templates', path: '/templates', icon: ImageIcon, label: 'Gallery', roles: ['admin', 'owner'] },
-    { id: 'sessions', path: '/sessions', icon: History, label: 'Sessions', roles: ['admin', 'owner'] },
-    { id: 'ai-gen', path: '/ai-gen', icon: Sparkles, label: 'AI Content', roles: ['admin', 'owner'] },
-    { id: 'storyboard', path: '/storyboard', icon: ImageIcon, label: 'Storyboard', roles: ['admin', 'owner'] },
-    { id: 'kiosks', path: '/kiosks', icon: Monitor, label: 'Kiosks', roles: ['admin', 'owner'] },
-    { id: 'analytics', path: '/analytics', icon: BarChart3, label: 'Analytics', roles: ['admin'] },
-    { id: 'users', path: '/users', icon: Users, label: 'Users', roles: ['admin'] },
-    { id: 'settings', path: '/settings', icon: Settings, label: 'Settings', roles: ['admin'] },
+    { id: 'dashboard', path: '/dashboard', icon: LayoutDashboard, label: 'Dashboard', superAdminOnly: false },
+    { id: 'templates', path: '/templates', icon: ImageIcon, label: 'Gallery', superAdminOnly: false },
+    { id: 'sessions', path: '/sessions', icon: History, label: 'Sessions', superAdminOnly: false },
+    { id: 'ai-gen', path: '/ai-gen', icon: Sparkles, label: 'AI Content', superAdminOnly: false },
+    { id: 'storyboard', path: '/storyboard', icon: ImageIcon, label: 'Storyboard', superAdminOnly: false },
+    { id: 'kiosks', path: '/kiosks', icon: Monitor, label: 'Kiosks', superAdminOnly: false },
+    { id: 'analytics', path: '/analytics', icon: BarChart3, label: 'Analytics', superAdminOnly: true },
+    { id: 'users', path: '/users', icon: Users, label: 'Users', superAdminOnly: true },
+    { id: 'settings', path: '/settings', icon: Settings, label: 'Settings', superAdminOnly: false },
   ];
 
   const handleLogout = () => {
-    localStorage.removeItem('unismiles_mock_session');
-    window.location.reload();
+    logout();
   };
 
-  const filteredItems = menuItems.filter(item => item.roles.includes(role));
+  const filteredItems = menuItems.filter(item => !item.superAdminOnly || isSuperAdmin);
   const activeId = menuItems.find(item => location.pathname.startsWith(item.path))?.id || 'dashboard';
 
   return (
