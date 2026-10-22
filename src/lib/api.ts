@@ -5,7 +5,7 @@ import axios, { AxiosError } from 'axios';
  * Memastikan path selalu berujung pada '/api/v1' tanpa duplikasi slash.
  */
 function getNormalizedApiBaseUrl(): string {
-  const envUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim();
+  const envUrl = (import.meta.env?.VITE_API_BASE_URL as string | undefined)?.trim() || (typeof process !== 'undefined' ? process.env?.VITE_API_BASE_URL : '');
   if (!envUrl) {
     return '';
   }

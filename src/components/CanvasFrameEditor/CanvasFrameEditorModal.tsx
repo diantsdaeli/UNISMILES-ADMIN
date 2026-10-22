@@ -44,8 +44,11 @@ import {
   PhotoSlot,
   createTemplate,
   updateTemplate,
+  buildTemplateFromPayload,
+  ENABLE_BACKEND_MUTATIONS,
   SimulationResult
 } from '../../lib/templates';
+import { useTemplate } from '../../TemplateContext';
 import { ReusableAsset, fetchReusableAssets, uploadReusableAsset, resolveAssetUrl } from '../../lib/assets';
 import { CanvasPreview } from './CanvasPreview';
 import { GradientStopEditor } from './GradientStopEditor';
@@ -81,6 +84,10 @@ export const CanvasFrameEditorModal: React.FC<CanvasFrameEditorModalProps> = ({
   const [zoom, setZoom] = useState<number>(35);
   const [showJsonModal, setShowJsonModal] = useState<boolean>(false);
   const [copiedJson, setCopiedJson] = useState<boolean>(false);
+
+  // Template Context & Submission Guard (Tahap 3C)
+  const { addTemplate, editTemplate } = useTemplate();
+  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
   // Safeguard Simulation State (Tahap 3B)
   const [simulationResult, setSimulationResult] = useState<SimulationResult | null>(null);
@@ -358,6 +365,10 @@ export const CanvasFrameEditorModal: React.FC<CanvasFrameEditorModalProps> = ({
   };
 
   const handleRunSimulation = async (explicitPublish = false) => {
+    // 1. Duplicate submit guard pada handler aplikasi sebenarnya
+    if (isSubmitting) return;
+    setIsSubmitting(true);
+
     const editorState: FrameEditorState = {
       preset: activePreset,
       name,
@@ -384,28 +395,56 @@ export const CanvasFrameEditorModal: React.FC<CanvasFrameEditorModalProps> = ({
       if (editingTemplate) {
         // Alur Edit: PUT /api/v1/admin/templates/:id (Mempertahankan ID dan status live)
         const payload = buildUpdateTemplatePayload(editingTemplate, editorState);
-        const result = (await updateTemplate(editingTemplate.backendId, payload, { simulate: true })) as SimulationResult;
-        setSimulationResult(result);
-        setShowSimulationModal(true);
-        if (result.validation.valid) {
-          toast.info('Simulasi validasi Update Frame berhasil. Mutasi backend ditahan sesuai safeguard Tahap 3B.');
-        } else {
-          toast.error(`Validasi payload gagal: ${result.validation.errors.join('; ')}`);
+        const result = (await updateTemplate(editingTemplate.backendId, payload, { simulate: !ENABLE_BACKEND_MUTATIONS })) as any;
+
+        if (result?.simulated) {
+          setSimulationResult(result as SimulationResult);
+          setShowSimulationModal(true);
+          if (result.validation?.valid) {
+            toast.info('Simulasi validasi Update Frame berhasil. Mutasi backend ditahan sesuai safeguard.');
+          } else {
+            toast.error(`Validasi payload gagal: ${result.validation?.errors?.join('; ')}`);
+          }
+        } else if (result?.success) {
+          // addTemplate dan editTemplate HANYA dijalankan SETELAH respons API sukses
+          await editTemplate(editingTemplate.backendId, {
+            name: payload.name,
+            digitalPrice: payload.digital_price,
+            digitalPrintPrice: payload.digital_print_price,
+            bgColor: payload.bg_color,
+            accentColor: payload.accent_color,
+            layoutConfig: payload.layout_config,
+            textElements: payload.text_elements,
+          });
+          toast.success('Template updated successfully');
+          onSaved?.();
         }
       } else {
         // Alur Create: POST /api/v1/admin/templates/generate (Default draft is_active=false)
-        const payload = buildCreateTemplatePayload(editorState);
-        const result = (await createTemplate(payload, { simulate: true })) as SimulationResult;
-        setSimulationResult(result);
-        setShowSimulationModal(true);
-        if (result.validation.valid) {
-          toast.info(`Simulasi validasi Create Frame (${explicitPublish ? 'Publish' : 'Draft'}) berhasil. Mutasi backend ditahan.`);
-        } else {
-          toast.error(`Validasi payload gagal: ${result.validation.errors.join('; ')}`);
+        const payload = buildCreateTemplatePayload(editorState, { publish: explicitPublish });
+        const result = (await createTemplate(payload, { simulate: !ENABLE_BACKEND_MUTATIONS })) as any;
+
+        if (result?.simulated) {
+          setSimulationResult(result as SimulationResult);
+          setShowSimulationModal(true);
+          if (result.validation?.valid) {
+            toast.info(`Simulasi validasi Create Frame (${explicitPublish ? 'Publish' : 'Draft'}) berhasil. Mutasi backend ditahan.`);
+          } else {
+            toast.error(`Validasi payload gagal: ${result.validation?.errors?.join('; ')}`);
+          }
+        } else if (result?.success) {
+          // addTemplate HANYA dijalankan SETELAH respons API sukses
+          const newId = result.data?.id || `local-${Date.now()}`;
+          const newTemplate = buildTemplateFromPayload(payload, newId);
+          await addTemplate(newTemplate);
+          toast.success('Template created successfully');
+          onSaved?.();
         }
       }
     } catch (err: any) {
-      toast.error(err?.message || 'Gagal menjalankan simulasi penyimpanan');
+      toast.error(err?.response?.data?.message || err?.message || 'Gagal menjalankan penyimpanan frame');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -489,8 +528,9 @@ export const CanvasFrameEditorModal: React.FC<CanvasFrameEditorModalProps> = ({
           {!editingTemplate && (
             <button
               type="button"
+              disabled={isSubmitting}
               onClick={() => handleRunSimulation(true)}
-              className="px-2.5 py-1.5 rounded-lg border border-amber-500/30 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 text-[10px] font-bold uppercase tracking-wider transition-colors cursor-pointer flex items-center gap-1"
+              className="px-2.5 py-1.5 rounded-lg border border-amber-500/30 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 text-[10px] font-bold uppercase tracking-wider transition-colors cursor-pointer flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
               title="Simulasi Simpan Draf (is_active=false)"
             >
               <Play className="w-3 h-3 text-amber-400" />
@@ -501,15 +541,16 @@ export const CanvasFrameEditorModal: React.FC<CanvasFrameEditorModalProps> = ({
           <div className="relative group">
             <button
               type="button"
+              disabled={isSubmitting}
               onClick={() => handleRunSimulation(false)}
-              className="px-3.5 py-1.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg text-[10px] font-black uppercase tracking-wider cursor-pointer flex items-center gap-1.5 shadow-lg shadow-emerald-500/20 transition-all"
+              className="px-3.5 py-1.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg text-[10px] font-black uppercase tracking-wider cursor-pointer flex items-center gap-1.5 shadow-lg shadow-emerald-500/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              <ShieldCheck className="w-3.5 h-3.5 text-white" />
-              {editingTemplate ? 'Simulasi Update' : 'Simulasi Save'}
+              {isSubmitting ? <Loader2 className="w-3.5 h-3.5 text-white animate-spin" /> : <ShieldCheck className="w-3.5 h-3.5 text-white" />}
+              {isSubmitting ? 'Memproses...' : (editingTemplate ? 'Simulasi Update' : 'Simulasi Save')}
             </button>
             <div className="absolute right-0 top-full mt-2 w-64 p-3 bg-[#1E293B] border border-emerald-500/30 rounded-xl shadow-2xl text-[9px] text-emerald-200 hidden group-hover:block z-50 pointer-events-none">
-              <p className="font-bold text-emerald-400 mb-1">🛡️ Safeguard Tahap 3B Aktif</p>
-              Menguji validasi payload dan simulasi alur {editingTemplate ? 'PUT' : 'POST'} secara penuh tanpa mengirim mutasi ke backend produksi.
+              <p className="font-bold text-emerald-400 mb-1">🛡️ Safeguard Tahap 3B/3C Aktif</p>
+              Menguji validasi payload dan alur {editingTemplate ? 'PUT' : 'POST'} secara aman tanpa risiko ke backend produksi.
             </div>
           </div>
         </div>

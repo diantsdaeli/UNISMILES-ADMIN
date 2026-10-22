@@ -1,5 +1,5 @@
-const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() || '';
-const publicBaseUrl = (import.meta.env.VITE_PUBLIC_BASE_URL as string | undefined)?.trim() || '';
+const apiBaseUrl = (import.meta.env?.VITE_API_BASE_URL as string | undefined)?.trim() || (typeof process !== 'undefined' ? process.env?.VITE_API_BASE_URL : '') || 'https://backend-photobooth.uniinside.net/api/v1';
+const publicBaseUrl = (import.meta.env?.VITE_PUBLIC_BASE_URL as string | undefined)?.trim() || (typeof process !== 'undefined' ? process.env?.VITE_PUBLIC_BASE_URL : '') || 'https://backend-photobooth.uniinside.net';
 
 export function apiOrigin(): string {
   if (!apiBaseUrl) {

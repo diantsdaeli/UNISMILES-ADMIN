@@ -9,9 +9,9 @@ interface TemplateContextType {
   loading: boolean;
   error: string | null;
   refreshTemplates: () => Promise<void>;
-  addTemplate: (template: Omit<Template, 'id' | 'usageCount' | 'backendId' | 'isActive'>) => Promise<void>;
-  editTemplate: (id: string, updates: Partial<Template>) => Promise<void>;
-  deleteTemplate: (id: string) => Promise<void>;
+  addTemplate: (template: Template | Omit<Template, 'id' | 'usageCount' | 'backendId' | 'isActive'>) => Promise<void>;
+  editTemplate: (id: string | number, updates: Partial<Template>) => Promise<void>;
+  deleteTemplate: (id: string | number) => Promise<void>;
 }
 
 const TemplateContext = createContext<TemplateContextType | undefined>(undefined);
@@ -44,18 +44,46 @@ export const TemplateProvider: React.FC<{ children: ReactNode }> = ({ children }
   }, [loadTemplates]);
 
   /**
-   * Pembatas Tahap 1: Operasi mutasi ditangguhkan hingga Tahap 2 untuk melindungi backend produksi.
+   * Menambahkan template baru ke state lokal TemplateContext tanpa refresh.
+   * Frame baru yang tersimpan secara default adalah draft (is_active: false).
    */
-  const addTemplate = async (_templateData: Omit<Template, 'id' | 'usageCount' | 'backendId' | 'isActive'>) => {
-    toast.info('Operasi tambah template ditangguhkan pada Tahap 1 (Read-Only). Fitur create/editor akan diaktifkan pada Tahap 2.');
+  const addTemplate = async (templateData: Template | Omit<Template, 'id' | 'usageCount' | 'backendId' | 'isActive'>) => {
+    let newTemplate: Template;
+    if ('id' in templateData && 'backendId' in templateData) {
+      newTemplate = templateData as Template;
+    } else {
+      const generatedId = `local-${Date.now()}`;
+      newTemplate = {
+        ...templateData,
+        id: generatedId,
+        backendId: generatedId,
+        isActive: false, // Default draft
+        status: 'inactive',
+        usageCount: 0,
+      } as Template;
+    }
+    setTemplates(prev => [newTemplate, ...prev]);
   };
 
-  const editTemplate = async (_id: string, _updates: Partial<Template>) => {
-    toast.info('Operasi edit template ditangguhkan pada Tahap 1 (Read-Only). Fitur update/editor akan diaktifkan pada Tahap 2.');
+  /**
+   * Memperbarui template existing pada state lokal TemplateContext.
+   * Mempertahankan backendId, isActive, slot geometry, dan metadata yang ada.
+   */
+  const editTemplate = async (id: string | number, updates: Partial<Template>) => {
+    const idStr = String(id);
+    setTemplates(prev =>
+      prev.map(t => (t.id === idStr || String(t.backendId) === idStr) ? { ...t, ...updates } : t)
+    );
   };
 
-  const deleteTemplate = async (_id: string) => {
-    toast.info('Operasi hapus template ditangguhkan pada Tahap 1 (Read-Only) untuk melindungi data produksi.');
+  /**
+   * Menghapus template dari state lokal TemplateContext.
+   */
+  const deleteTemplate = async (id: string | number) => {
+    const idStr = String(id);
+    setTemplates(prev =>
+      prev.filter(t => t.id !== idStr && String(t.backendId) !== idStr)
+    );
   };
 
   return (

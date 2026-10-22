@@ -42,11 +42,12 @@ export interface AssetElement {
 }
 
 export interface PhotoSlot {
-  index: number;
+  index?: number;
   x: number;
   y: number;
   width: number;
   height: number;
+  [key: string]: unknown;
 }
 
 export interface CanvasLayoutConfig {
@@ -60,11 +61,13 @@ export interface CanvasLayoutConfig {
     gradientAngle?: number;
     gradientStops?: Array<{ color: string; offset: number }>;
     imageUrl?: string;
+    [key: string]: unknown;
   };
   slots?: PhotoSlot[];
   slotBorder?: {
     color: string;
     width: number;
+    [key: string]: unknown;
   };
   elements?: TextElement[];
   assetElements?: AssetElement[];
@@ -342,21 +345,18 @@ export function validateTemplatePayload(
   }
 
   // 3. Validasi Harga Paket (Digital & Digital Print)
+  // Backend rule (packagePricing.js:22): amount > 0 && amount <= 9999999999 (Rp0 TIDAK diperbolehkan)
   if (payload.digital_price !== undefined && payload.digital_price !== null) {
     const dp = Number(payload.digital_price);
-    if (!Number.isSafeInteger(dp) || dp < 0) {
-      errors.push('digital_price harus berupa nominal bulat positif.');
-    } else if (dp === 0) {
-      warnings.push('digital_price bernilai Rp 0 (Gratis).');
+    if (!Number.isSafeInteger(dp) || dp <= 0 || dp > 9999999999) {
+      errors.push('digital_price wajib berupa nominal Rupiah bulat positif, maksimal Rp9.999.999.999.');
     }
   }
 
   if (payload.digital_print_price !== undefined && payload.digital_print_price !== null) {
     const dpp = Number(payload.digital_print_price);
-    if (!Number.isSafeInteger(dpp) || dpp < 0) {
-      errors.push('digital_print_price harus berupa nominal bulat positif.');
-    } else if (dpp === 0) {
-      warnings.push('digital_print_price bernilai Rp 0 (Gratis).');
+    if (!Number.isSafeInteger(dpp) || dpp <= 0 || dpp > 9999999999) {
+      errors.push('digital_print_price wajib berupa nominal Rupiah bulat positif, maksimal Rp9.999.999.999.');
     }
   }
 
@@ -405,9 +405,55 @@ export function validateTemplatePayload(
 /**
  * Flag Safeguard Mutasi Backend:
  * Menjamin TIDAK ADA request POST/PUT/DELETE yang dieksekusi ke backend produksi
- * pada Tahap 3B sampai persetujuan izin tertulis diberikan.
+ * pada Tahap 3B/3C sampai persetujuan izin tertulis diberikan.
  */
 export const ENABLE_BACKEND_MUTATIONS = false;
+
+export interface ServiceExecutionOptions {
+  simulate?: boolean;
+  customApi?: import('axios').AxiosInstance;
+}
+
+/**
+ * Memetakan payload CreateTemplatePayload dan ID dari backend/mock
+ * menjadi struktur objek Template Dian yang siap dimasukkan ke TemplateContext.
+ */
+export function buildTemplateFromPayload(
+  payload: CreateTemplatePayload,
+  id: number | string,
+  extra?: { createdAt?: string; usageCount?: number }
+): Template {
+  const idStr = String(id);
+  const isActive = Boolean(payload.is_active);
+  const rawImageUrl = payload.image_url || payload.layout_config?.overlayUrl || '';
+  const resolvedImageUrl = rawImageUrl ? resolvePublicUrl(rawImageUrl) : '';
+
+  return {
+    id: idStr,
+    backendId: id,
+    name: payload.name || 'Untitled Template',
+    category: (payload.layout_config?.category as string) || 'General',
+    imageUrl: resolvedImageUrl,
+    status: isActive ? 'active' : 'inactive',
+    isActive,
+    usageCount: extra?.usageCount ?? 0,
+    createdAt: extra?.createdAt ?? new Date().toISOString(),
+    layoutId: payload.layout_id || '1x1',
+    slotCount: payload.slot_count || 1,
+    price: payload.price ?? payload.digital_price ?? 0,
+    digitalPrice: payload.digital_price ?? payload.price ?? 0,
+    digitalPrintPrice: payload.digital_print_price ?? payload.price ?? 0,
+    layoutConfig: payload.layout_config,
+    bgColor: payload.bg_color || '#1E293B',
+    accentColor: payload.accent_color || '#FFFFFF',
+    frameType: payload.frame_type || 'color',
+    gradientStops: payload.gradient_stops || [],
+    gradientAngle: payload.gradient_angle ?? 45,
+    gradientStyle: payload.gradient_style || 'linear',
+    textElements: payload.text_elements || [],
+    assetId: payload.asset_id ?? null,
+  };
+}
 
 /**
  * Service API: Buat frame template baru (POST /api/v1/admin/templates/generate)
@@ -415,9 +461,9 @@ export const ENABLE_BACKEND_MUTATIONS = false;
  */
 export async function createTemplate(
   payload: CreateTemplatePayload,
-  options?: { simulate?: boolean }
-): Promise<SimulationResult | { success: boolean; data: unknown }> {
-  const shouldSimulate = options?.simulate ?? !ENABLE_BACKEND_MUTATIONS;
+  options?: ServiceExecutionOptions
+): Promise<SimulationResult | { success: boolean; data?: unknown; message?: string }> {
+  const shouldSimulate = options?.simulate ?? (!options?.customApi && !ENABLE_BACKEND_MUTATIONS);
   const validation = validateTemplatePayload(payload, false);
 
   if (shouldSimulate) {
@@ -437,7 +483,8 @@ export async function createTemplate(
     throw new Error(`Validasi payload gagal: ${validation.errors.join('; ')}`);
   }
 
-  const response = await api.post('/admin/templates/generate', payload);
+  const client = options?.customApi ?? api;
+  const response = await client.post('/admin/templates/generate', payload);
   return response.data;
 }
 
@@ -448,9 +495,9 @@ export async function createTemplate(
 export async function updateTemplate(
   id: string | number,
   payload: UpdateTemplatePayload,
-  options?: { simulate?: boolean }
-): Promise<SimulationResult | { success: boolean; data: unknown }> {
-  const shouldSimulate = options?.simulate ?? !ENABLE_BACKEND_MUTATIONS;
+  options?: ServiceExecutionOptions
+): Promise<SimulationResult | { success: boolean; data?: unknown; message?: string }> {
+  const shouldSimulate = options?.simulate ?? (!options?.customApi && !ENABLE_BACKEND_MUTATIONS);
   const validation = validateTemplatePayload(payload, true);
 
   if (shouldSimulate) {
@@ -471,6 +518,7 @@ export async function updateTemplate(
     throw new Error(`Validasi payload gagal: ${validation.errors.join('; ')}`);
   }
 
-  const response = await api.put(`/admin/templates/${id}`, payload);
+  const client = options?.customApi ?? api;
+  const response = await client.put(`/admin/templates/${id}`, payload);
   return response.data;
 }

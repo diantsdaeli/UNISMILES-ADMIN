@@ -387,7 +387,10 @@ export interface FrameEditorState {
 /**
  * Menyusun payload untuk Create Frame Baru (POST /api/v1/admin/templates/generate)
  */
-export function buildCreateTemplatePayload(state: FrameEditorState): CreateTemplatePayload {
+export function buildCreateTemplatePayload(
+  state: FrameEditorState,
+  options?: { publish?: boolean }
+): CreateTemplatePayload {
   const dPrice = Number(state.digitalPrice) || 0;
   const dpPrice = Number(state.digitalPrintPrice) || dPrice;
   const frameConfig = buildFrameConfig(
@@ -424,7 +427,7 @@ export function buildCreateTemplatePayload(state: FrameEditorState): CreateTempl
     layout_config: frameConfig,
     image_url: frameConfig.overlayUrl || '',
     asset_id: state.overlayAssetId ?? null,
-    is_active: Boolean(state.isActive),
+    is_active: options?.publish !== undefined ? Boolean(options.publish) : Boolean(state.isActive),
   };
 }
 
