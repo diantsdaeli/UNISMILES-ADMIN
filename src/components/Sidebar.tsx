@@ -42,7 +42,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ role }) => {
 
   const menuItems = [
     { id: 'dashboard', path: '/dashboard', icon: LayoutDashboard, label: 'Dashboard', superAdminOnly: false },
-    { id: 'templates', path: '/templates', icon: ImageIcon, label: 'Gallery', superAdminOnly: false },
+    { id: 'templates', path: '/templates', icon: ImageIcon, label: 'Gallery Templates', superAdminOnly: false },
     { id: 'sessions', path: '/sessions', icon: History, label: 'Sessions', superAdminOnly: false },
     { id: 'ai-gen', path: '/ai-gen', icon: Sparkles, label: 'AI Content', superAdminOnly: false },
     { id: 'storyboard', path: '/storyboard', icon: ImageIcon, label: 'Storyboard', superAdminOnly: false },

@@ -1,109 +1,75 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback } from 'react';
 import { toast } from 'sonner';
+import { Template, fetchTemplates } from './lib/templates';
 
-export interface Template {
-  id: string;
-  name: string;
-  category: string;
-  imageUrl: string;
-  status: 'active' | 'inactive';
-  usageCount: number;
-  createdAt?: any;
-  updatedAt?: any;
-  isDummy?: boolean;
-}
+export type { Template } from './lib/templates';
 
 interface TemplateContextType {
   templates: Template[];
-  addTemplate: (template: Omit<Template, 'id' | 'usageCount'>) => Promise<void>;
+  loading: boolean;
+  error: string | null;
+  refreshTemplates: () => Promise<void>;
+  addTemplate: (template: Omit<Template, 'id' | 'usageCount' | 'backendId' | 'isActive'>) => Promise<void>;
   editTemplate: (id: string, updates: Partial<Template>) => Promise<void>;
   deleteTemplate: (id: string) => Promise<void>;
-  loading: boolean;
 }
 
 const TemplateContext = createContext<TemplateContextType | undefined>(undefined);
 
-const LOCAL_STORAGE_KEY = 'unismiles_templates';
-
 export const TemplateProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [templates, setTemplates] = useState<Template[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  // Helper to parse dates from backend into the expected format
-  const parseTemplate = (t: any): Template => ({
-    ...t,
-    createdAt: t.createdAt ? { toDate: () => new Date(t.createdAt) } : { toDate: () => new Date() },
-    updatedAt: t.updatedAt ? { toDate: () => new Date(t.updatedAt) } : undefined
-  });
+  const loadTemplates = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await fetchTemplates();
+      setTemplates(data);
+    } catch (err: any) {
+      console.error('Error fetching templates from backend:', err);
+      const msg = err?.response?.data?.message || err?.message || 'Gagal terhubung ke backend templates.';
+      setError(msg);
+      // PENTING: Jangan tampilkan data lokal dummy seolah-olah data asli backend
+      setTemplates([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   // Fetch Templates on mount
   useEffect(() => {
-    async function fetchTemplates() {
-      try {
-        const res = await fetch("/api/templates");
-        if (res.ok) {
-          const data = await res.json();
-          setTemplates(data.map(parseTemplate));
-        }
-      } catch (err) {
-        console.error("Error fetching templates:", err);
-      } finally {
-        setLoading(false);
-      }
-    }
-    fetchTemplates();
-  }, []);
+    loadTemplates();
+  }, [loadTemplates]);
 
-  const addTemplate = async (templateData: Omit<Template, 'id' | 'usageCount'>) => {
-    try {
-      const res = await fetch("/api/templates", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(templateData)
-      });
-      if (res.ok) {
-        const newTemplate = await res.json();
-        setTemplates(prev => [parseTemplate(newTemplate), ...prev]);
-      } else {
-        toast.error("Failed to upload template.");
-      }
-    } catch (err) {
-      console.error("Error adding template:", err);
-      toast.error("Network error while adding template.");
-    }
+  /**
+   * Pembatas Tahap 1: Operasi mutasi ditangguhkan hingga Tahap 2 untuk melindungi backend produksi.
+   */
+  const addTemplate = async (_templateData: Omit<Template, 'id' | 'usageCount' | 'backendId' | 'isActive'>) => {
+    toast.info('Operasi tambah template ditangguhkan pada Tahap 1 (Read-Only). Fitur create/editor akan diaktifkan pada Tahap 2.');
   };
 
-  const editTemplate = async (id: string, updates: Partial<Template>) => {
-    try {
-      const res = await fetch(`/api/templates/${id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(updates)
-      });
-      if (res.ok) {
-        const updated = await res.json();
-        setTemplates(prev => prev.map(t => t.id === id ? parseTemplate(updated) : t));
-      }
-    } catch (err) {
-      console.error("Error editing template:", err);
-    }
+  const editTemplate = async (_id: string, _updates: Partial<Template>) => {
+    toast.info('Operasi edit template ditangguhkan pada Tahap 1 (Read-Only). Fitur update/editor akan diaktifkan pada Tahap 2.');
   };
 
-  const deleteTemplate = async (id: string) => {
-    try {
-      const res = await fetch(`/api/templates/${id}`, {
-        method: "DELETE"
-      });
-      if (res.ok) {
-        setTemplates(prev => prev.filter(t => t.id !== id));
-      }
-    } catch (err) {
-      console.error("Error deleting template:", err);
-    }
+  const deleteTemplate = async (_id: string) => {
+    toast.info('Operasi hapus template ditangguhkan pada Tahap 1 (Read-Only) untuk melindungi data produksi.');
   };
 
   return (
-    <TemplateContext.Provider value={{ templates, addTemplate, editTemplate, deleteTemplate, loading }}>
+    <TemplateContext.Provider
+      value={{
+        templates,
+        loading,
+        error,
+        refreshTemplates: loadTemplates,
+        addTemplate,
+        editTemplate,
+        deleteTemplate,
+      }}
+    >
       {children}
     </TemplateContext.Provider>
   );

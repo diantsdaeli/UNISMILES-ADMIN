@@ -1,530 +1,608 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Plus, 
   Search, 
-  Filter, 
-  MoreVertical, 
-  Eye, 
-  Pencil, 
-  Trash2, 
-  CheckCircle2, 
-  Clock, 
-  FileText,
-  X,
+  LayoutTemplate,
+  ImageIcon,
+  Sparkles,
+  Loader2,
+  Layers,
   Upload,
-  Cloud,
-  Smile,
-  GraduationCap,
-  Maximize2,
-  Edit3
+  Lock
 } from 'lucide-react';
 import { cn } from '../lib/utils';
-import { useTemplate } from '../TemplateContext';
+import { useTemplate, Template } from '../TemplateContext';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'motion/react';
 import { useNavigate } from 'react-router-dom';
+import { 
+  LAYOUT_PRESETS, 
+  LayoutPreset,
+  EVENT_CATEGORIES 
+} from '../lib/layoutPresets';
+import { 
+  CanvasFrameEditorModal, 
+  LayoutTabIcon, 
+  FrameCard 
+} from '../components/CanvasFrameEditor';
+import { fetchReusableAssets, ReusableAsset, resolveAssetUrl } from '../lib/assets';
 
 export const TemplateManagement: React.FC = () => {
   const navigate = useNavigate();
-  const { templates, addTemplate, editTemplate, deleteTemplate } = useTemplate();
-  const [search, setSearch] = useState('');
-  const [filter, setFilter] = useState('All');
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [uploading, setUploading] = useState(false);
-  const [isCreating, setIsCreating] = useState(false);
-  const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null);
-  const [previewTemplate, setPreviewTemplate] = useState<any | null>(null);
-  const [newTemplate, setNewTemplate] = useState<{
-    name: string;
-    category: string;
-    imageUrl: string;
-    status: 'active' | 'inactive';
-  }>({
-    name: '',
-    category: 'Birthday',
-    imageUrl: '',
-    status: 'active'
-  });
+  const { templates, loading, error, refreshTemplates } = useTemplate();
 
-  const fileInputRef = React.useRef<HTMLInputElement>(null);
+  // Tab Level 1: Frame Templates vs Sticker Library
+  const [activeMainTab, setActiveMainTab] = useState<'frames' | 'stickers'>('frames');
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file && (file.type === 'image/png' || file.type === 'image/jpeg' || file.type === 'image/jpg')) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setNewTemplate({ ...newTemplate, imageUrl: reader.result as string });
-      };
-      reader.readAsDataURL(file);
-    } else if (file) {
-      toast.error('Please upload a PNG or JPG file.');
-    }
-  };
-
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
-  };
-
-  const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    const file = e.dataTransfer.files?.[0];
-    if (file && (file.type === 'image/png' || file.type === 'image/jpeg' || file.type === 'image/jpg')) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setNewTemplate({ ...newTemplate, imageUrl: reader.result as string });
-      };
-      reader.readAsDataURL(file);
-    } else if (file) {
-      toast.error('Please upload a PNG or JPG file.');
-    }
-  };
-
-  const categories = ['All', 'Birthday', 'Wedding', 'Graduation', 'Corporate', 'Holiday'];
-
-  const handleAddTemplate = async (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    if (!newTemplate.name) {
-      toast.error("Please fill in all fields");
-      return;
-    }
-    
-    if (!newTemplate.imageUrl) {
-      toast.error("Please upload a template file.");
-      return;
-    }
-
-    setIsCreating(true);
-
-    // Capture current state to avoid issues with clearing before async finish
-    const templateData = { ...newTemplate };
-    const currentEditingId = editingTemplateId;
-
-    // Start setTimeout for exactly 2000ms as requested
-    setTimeout(async () => {
-      try {
-        // 1. Simpan data template ke context/state
-        if (currentEditingId) {
-          await editTemplate(currentEditingId, templateData);
-        } else {
-          await addTemplate(templateData);
-        }
-        
-        // 2. set isLoading(false) untuk menghentikan animasi muter
-        setIsCreating(false);
-
-        // 3. set setShowModal(false) untuk menutup modal secara otomatis
-        setIsModalOpen(false);
-
-        // 4. Panggil fungsi untuk memunculkan Toast Notifikasi
-        toast.success(currentEditingId ? "Template Berhasil Diperbarui" : "Template Berhasil Ditambahkan", {
-          icon: <CheckCircle2 className="w-5 h-5 text-green-400" />,
-          duration: 5000,
-          position: 'top-center',
-          style: {
-            background: 'rgba(16, 185, 129, 0.15)',
-            backdropFilter: 'blur(12px)',
-            border: '1px solid rgba(16, 185, 129, 0.2)',
-            color: '#fff',
-            borderRadius: '9999px',
-            padding: '12px 24px',
-            fontWeight: '600',
-            fontSize: '14px',
-            boxShadow: '0 10px 30px -10px rgba(16, 185, 129, 0.3)'
-          }
-        });
-
-        // Reset state
-        setEditingTemplateId(null);
-        setNewTemplate({ name: '', category: 'Birthday', imageUrl: '', status: 'active' });
-      } catch (error) {
-        console.error("Error in template operation:", error);
-        setIsCreating(false);
-        toast.error("Gagal menyimpan template. Pastikan ukuran file tidak terlalu besar.");
-      }
-    }, 2000);
-  };
-
-  const handleEditClick = (template: any) => {
-    setEditingTemplateId(template.id);
-    setNewTemplate({
-      name: template.name,
-      category: template.category,
-      imageUrl: template.imageUrl,
-      status: template.status
-    });
-    setIsModalOpen(true);
-  };
-
-  const handleDeleteTemplate = async (id: string) => {
-    if (!id) return;
-    
-    if (!window.confirm("Apakah Anda yakin ingin menghapus template ini?")) {
-      return;
-    }
-    
-    try {
-      await deleteTemplate(id);
-
-      // 3. Show success notification
-      toast.error("Template Berhasil Dihapus", {
-        icon: <Trash2 className="w-5 h-5 text-red-400" />,
-        duration: 3000,
-        position: 'top-center',
-        style: {
-          background: 'rgba(239, 68, 68, 0.15)',
-          backdropFilter: 'blur(12px)',
-          border: '1px solid rgba(239, 68, 68, 0.2)',
-          color: '#fff',
-          borderRadius: '9999px',
-          padding: '12px 24px',
-          fontWeight: '600',
-          fontSize: '14px'
-        }
-      });
-    } catch (error) {
-      console.error("Error deleting template:", error);
-    }
-  };
-
-  const filteredTemplates = templates.filter(t => 
-    (filter === 'All' || t.category === filter) &&
-    t.name.toLowerCase().includes(search.toLowerCase())
+  // Active Layout Preset (7 Horizontal Presets: 1x1, 2x1, 3x1, 4x1, 2x2, 2x3, 3x3)
+  const [activeLayoutId, setActiveLayoutId] = useState<string>('1x1');
+  const activePreset: LayoutPreset = useMemo(
+    () => LAYOUT_PRESETS.find(p => p.id === activeLayoutId) || LAYOUT_PRESETS[0],
+    [activeLayoutId]
   );
 
-  return (
-    <div className="space-y-8 animate-in fade-in duration-500">
-      <header className="flex justify-between items-end mb-4">
-        <div>
-          <h1 className="text-5xl font-black tracking-tighter uppercase leading-[0.8] mb-2">Templates</h1>
-          <p className="text-muted text-[10px] font-black uppercase tracking-[0.3em] opacity-60">Visual Assets & Frame Overlays Portfolio</p>
-        </div>
-        <button 
-          onClick={() => setIsModalOpen(true)}
-          className="btn-primary flex items-center gap-3 px-10"
-        >
-          <Plus className="w-5 h-5" /> New Template
-        </button>
-      </header>
+  // Layout Prices (Digital & Digital & Print)
+  const [layoutPrice, setLayoutPrice] = useState<string>('1500');
+  const [layoutPrintPrice, setLayoutPrintPrice] = useState<string>('3000');
+  const [isSavingLayoutPrice, setIsSavingLayoutPrice] = useState<boolean>(false);
 
-      {/* Module Navigation Tabs */}
-      <div className="flex gap-6 border-b border-white/5 pb-2">
+  // Secondary Filter Dian: Kategori Event & Search
+  const [selectedCategory, setSelectedCategory] = useState<string>('All');
+  const [searchQuery, setSearchQuery] = useState<string>('');
+
+  // Editor Modal Fullscreen State
+  const [isEditorOpen, setIsEditorOpen] = useState<boolean>(false);
+  const [editorTemplate, setEditorTemplate] = useState<Template | null>(null);
+
+  // Sticker Library Assets State
+  const [stickersList, setStickersList] = useState<ReusableAsset[]>([]);
+  const [stickersLoading, setStickersLoading] = useState<boolean>(false);
+  const [stickerFilterType, setStickerFilterType] = useState<string>('all');
+  const [stickerSearch, setStickerSearch] = useState<string>('');
+
+  // Templates for Active Layout
+  const templatesForLayout = useMemo(
+    () => templates.filter(t => t.layoutId === activeLayoutId),
+    [templates, activeLayoutId]
+  );
+
+  const enabledFrameCount = useMemo(
+    () => templatesForLayout.filter(t => t.isActive).length,
+    [templatesForLayout]
+  );
+
+  // Auto-sync prices from templates on layout switch
+  useEffect(() => {
+    const digitalPrices = templatesForLayout
+      .map(t => t.digitalPrice ?? t.price)
+      .filter((p): p is number => p !== null && p !== undefined && p > 0);
+    const printPrices = templatesForLayout
+      .map(t => t.digitalPrintPrice ?? t.price)
+      .filter((p): p is number => p !== null && p !== undefined && p > 0);
+
+    if (digitalPrices.length > 0) {
+      setLayoutPrice(String(digitalPrices[0]));
+    } else {
+      setLayoutPrice('1500');
+    }
+
+    if (printPrices.length > 0) {
+      setLayoutPrintPrice(String(printPrices[0]));
+    } else {
+      setLayoutPrintPrice('3000');
+    }
+  }, [activeLayoutId, templatesForLayout]);
+
+  // Load Sticker Library Assets when Tab Stickers active
+  useEffect(() => {
+    if (activeMainTab !== 'stickers') return;
+    setStickersLoading(true);
+    Promise.all([
+      fetchReusableAssets('sticker'),
+      fetchReusableAssets('logo'),
+      fetchReusableAssets('overlay'),
+    ])
+      .then(([stickers, logos, overlays]) => {
+        setStickersList([...stickers, ...logos, ...overlays]);
+      })
+      .catch(err => {
+        console.warn('Failed loading assets for sticker library:', err);
+      })
+      .finally(() => {
+        setStickersLoading(false);
+      });
+  }, [activeMainTab]);
+
+  // Filtered Templates based on layout + secondary category + search
+  const filteredTemplates = useMemo(() => {
+    return templatesForLayout.filter(t => {
+      const matchCategory =
+        selectedCategory === 'All' || t.category.toLowerCase() === selectedCategory.toLowerCase();
+      const matchSearch =
+        !searchQuery.trim() || t.name.toLowerCase().includes(searchQuery.toLowerCase().trim());
+      return matchCategory && matchSearch;
+    });
+  }, [templatesForLayout, selectedCategory, searchQuery]);
+
+  // Handlers
+  const handleCreateClick = () => {
+    setEditorTemplate(null);
+    setIsEditorOpen(true);
+  };
+
+  const handleEditClick = (template: Template) => {
+    setEditorTemplate(template);
+    setIsEditorOpen(true);
+  };
+
+  const handleDuplicateClick = (template: Template) => {
+    // Clone template locally and open editor with duplicated values
+    const duplicateData: Template = {
+      ...template,
+      id: `${template.id}-copy`,
+      name: `${template.name} (Copy)`,
+    };
+    setEditorTemplate(duplicateData);
+    setIsEditorOpen(true);
+    toast.info(`Duplikasi "${template.name}" dibuka di editor.`);
+  };
+
+  const handleDeleteClick = (template: Template) => {
+    toast.info(
+      'Operasi hapus frame ditangguhkan pada mode Read-Only untuk melindungi data server produksi.'
+    );
+  };
+
+  const handleToggleActive = (template: Template) => {
+    toast.info(
+      `Pengubahan status aktif "${template.name}" ditangguhkan pada mode Read-Only (akan aktif pada Tahap 3).`
+    );
+  };
+
+  const handleSaveAllPrices = () => {
+    toast.info(
+      `Penyimpanan harga massal ke semua frame (${activePreset.label}) ditangguhkan pada mode Read-Only.`
+    );
+  };
+
+  const handleOpenStoryboard = (template: Template) => {
+    navigate('/storyboard', { state: { templateId: template.id } });
+    toast.success(`Membuka template "${template.name}" di Storyboard Dian.`);
+  };
+
+  return (
+    <div className="space-y-6 animate-in fade-in duration-500">
+      {/* Fullscreen Canvas Frame Editor */}
+      <CanvasFrameEditorModal
+        isOpen={isEditorOpen}
+        editingTemplate={editorTemplate}
+        activePreset={activePreset}
+        digitalPrice={layoutPrice}
+        digitalPrintPrice={layoutPrintPrice}
+        onClose={() => {
+          setIsEditorOpen(false);
+          setEditorTemplate(null);
+        }}
+        onSaved={() => {
+          setIsEditorOpen(false);
+          setEditorTemplate(null);
+          refreshTemplates();
+        }}
+      />
+
+      {/* Main Page Header */}
+      <div className="flex items-end justify-between">
+        <div>
+          <h1 className="text-3xl font-display font-bold tracking-tight text-foreground flex items-center gap-3">
+            <div className="p-2 bg-primary/10 rounded-xl">
+              <LayoutTemplate className="w-8 h-8 text-primary" />
+            </div>
+            Image Frames
+          </h1>
+          <p className="text-muted mt-1 font-medium">Enable layouts and customize styles.</p>
+        </div>
+      </div>
+
+      {/* Level 1 Navigation Tabs: Frame Templates vs Sticker Library */}
+      <div className="flex gap-6 border-b border-white/10 pb-2">
         <button
-          onClick={() => navigate('/templates')}
+          type="button"
+          onClick={() => setActiveMainTab('frames')}
           className={cn(
-            "pb-3 text-xs font-black uppercase tracking-widest border-b-2 transition-all cursor-pointer",
-            "border-emerald-500 text-emerald-400"
+            'pb-3 text-xs font-black uppercase tracking-widest border-b-2 transition-all cursor-pointer',
+            activeMainTab === 'frames'
+              ? 'border-primary text-primary'
+              : 'border-transparent text-muted hover:text-foreground'
           )}
         >
           Frame Templates
         </button>
         <button
-          onClick={() => navigate('/templates/stickers')}
+          type="button"
+          onClick={() => setActiveMainTab('stickers')}
           className={cn(
-            "pb-3 text-xs font-black uppercase tracking-widest border-b-2 transition-all cursor-pointer",
-            "border-transparent text-muted hover:text-foreground"
+            'pb-3 text-xs font-black uppercase tracking-widest border-b-2 transition-all cursor-pointer flex items-center gap-1.5',
+            activeMainTab === 'stickers'
+              ? 'border-primary text-primary'
+              : 'border-transparent text-muted hover:text-foreground'
           )}
         >
+          <Sparkles className="w-3.5 h-3.5" />
           Sticker Library
         </button>
       </div>
 
-      {/* Upload Modal */}
-      <AnimatePresence>
-        {isModalOpen && (
-          <motion.div 
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm"
-          >
-            <motion.div 
-              initial={{ scale: 0.9, opacity: 0, y: 20 }}
-              animate={{ scale: 1, opacity: 1, y: 0 }}
-              exit={{ scale: 0.9, opacity: 0, y: 20 }}
-              className="bg-[#1E293B] border border-white/5 w-full max-w-md p-10 relative overflow-hidden rounded-[3rem] shadow-2xl"
-            >
-              {/* Loading Overlay */}
-              <AnimatePresence>
-                {isCreating && (
-                  <motion.div 
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    exit={{ opacity: 0 }}
-                    className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-[#10172A]/80 backdrop-blur-xl"
-                  >
-                    <div className="flex flex-col items-center gap-8">
-                      <div className="relative w-24 h-24 flex items-center justify-center">
-                        <div className="absolute inset-0 border-4 border-white/5 rounded-full" />
-                        <motion.div 
-                          className="absolute inset-0"
-                          animate={{ rotate: 360 }}
-                          transition={{ repeat: Infinity, duration: 1, ease: "linear" }}
-                        >
-                          <svg viewBox="0 0 100 100" className="w-full h-full text-primary">
-                            <path 
-                              d="M 30 65 A 25 25 0 0 0 70 65" 
-                              fill="none" 
-                              stroke="currentColor" 
-                              strokeWidth="5" 
-                              strokeLinecap="round"
-                            />
-                          </svg>
-                        </motion.div>
-                      </div>
-                      
-                      <div className="text-center">
-                        <p className="text-[10px] font-black uppercase tracking-[0.5em] text-primary">Syncing</p>
-                      </div>
-                    </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
+      {/* ======================================================================== */}
+      {/* TAB 1: FRAME TEMPLATES (IMAGE FRAMES NADIN VIEW - PERSIS GAMBAR 2)        */}
+      {/* ======================================================================== */}
+      {activeMainTab === 'frames' && (
+        <div className="space-y-6">
+          {/* Horizontal 7 Layout Selector Tabs */}
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 custom-scrollbar">
+            {LAYOUT_PRESETS.map(preset => {
+              const active = preset.id === activeLayoutId;
+              const hasActiveTemplates = templates
+                .filter(t => t.layoutId === preset.id)
+                .some(t => t.isActive);
 
-              <button 
-                onClick={() => {
-                  if (isCreating) return;
-                  setIsModalOpen(false);
-                  setEditingTemplateId(null);
-                  setNewTemplate({ name: '', category: 'Birthday', imageUrl: '', status: 'active' });
-                }}
-                disabled={isCreating}
-                className="absolute top-8 right-8 text-muted hover:text-foreground z-10 disabled:opacity-0"
-              >
-                <X className="w-6 h-6" />
-              </button>
-              
-              <h2 className="text-2xl font-black tracking-tighter uppercase mb-8">
-                {editingTemplateId ? 'Edit Asset' : 'New Asset'}
-              </h2>
-              
-              <form onSubmit={handleAddTemplate} className="space-y-6">
-              <div className="space-y-2">
-                <label className="text-[9px] font-black text-muted uppercase tracking-widest ml-1">Asset Identity</label>
-                <input 
-                  required
-                  value={newTemplate.name}
-                  onChange={e => setNewTemplate({...newTemplate, name: e.target.value})}
-                  className="w-full bg-black/20 border border-white/5 rounded-2xl px-6 py-4 outline-none focus:border-primary/40 font-black text-sm text-foreground"
-                  placeholder="e.g. Summer Vibes 2026"
-                />
-              </div>
-              <div className="space-y-2">
-                <label className="text-[9px] font-black text-muted uppercase tracking-widest ml-1">Category</label>
-                <select 
-                  value={newTemplate.category}
-                  onChange={e => setNewTemplate({...newTemplate, category: e.target.value})}
-                  className="w-full bg-black/20 border border-white/5 rounded-2xl px-6 py-4 outline-none focus:border-primary/40 font-black text-[10px] uppercase tracking-widest appearance-none text-foreground"
-                >
-                  {categories.filter(c => c !== 'All').map(c => <option key={c} value={c} className="bg-[#1E293B]">{c}</option>)}
-                </select>
-              </div>
-              <div className="space-y-2">
-                <label className="text-[9px] font-black text-muted uppercase tracking-widest ml-1">Composition (PNG Only)</label>
-                <div 
-                  onClick={() => fileInputRef.current?.click()}
-                  onDragOver={handleDragOver}
-                  onDrop={handleDrop}
+              return (
+                <button
+                  key={preset.id}
+                  type="button"
+                  onClick={() => setActiveLayoutId(preset.id)}
                   className={cn(
-                    "w-full h-48 bg-[#10172A] border-4 border-dashed border-white/5 rounded-3xl flex flex-col items-center justify-center gap-4 cursor-pointer hover:border-primary/40 transition-all group overflow-hidden relative",
-                    newTemplate.imageUrl && "border-primary/40 shadow-xl shadow-primary/5"
+                    'flex items-center gap-2 px-4 py-2.5 rounded-xl whitespace-nowrap transition-all flex-shrink-0 cursor-pointer',
+                    active
+                      ? 'bg-primary text-[#10172A] shadow-[0_4px_15px_rgba(255,184,0,0.25)] font-bold'
+                      : 'bg-white/5 border border-white/10 text-muted hover:text-foreground hover:bg-white/8'
                   )}
                 >
-                  {newTemplate.imageUrl ? (
-                    <>
-                      <img src={newTemplate.imageUrl} alt="Asset Visual" className="w-full h-full object-contain p-8" />
-                      <div className="absolute inset-x-0 bottom-0 bg-primary/90 py-2 text-center">
-                        <span className="text-[8px] font-black uppercase tracking-[0.3em] text-[#10172A]">Replace Resource</span>
-                      </div>
-                    </>
-                  ) : (
-                    <>
-                      <Upload className="w-10 h-10 text-muted group-hover:text-primary transition-all group-hover:scale-110" />
-                      <div className="text-center">
-                        <p className="text-[8px] font-black text-muted uppercase tracking-widest">Drop Resource PNG / JPG</p>
-                      </div>
-                    </>
+                  <LayoutTabIcon preset={preset} active={active} />
+                  <span className="text-[11px] font-black uppercase tracking-wider">
+                    {preset.label}
+                  </span>
+                  <span
+                    className={cn(
+                      'text-[9px] font-bold',
+                      active ? 'text-[#10172A]/70' : 'text-muted/60'
+                    )}
+                  >
+                    ({preset.width}×{preset.height})
+                  </span>
+                  {hasActiveTemplates && (
+                    <span
+                      className={cn(
+                        'w-1.5 h-1.5 rounded-full flex-shrink-0',
+                        active
+                          ? 'bg-[#10172A]/70'
+                          : 'bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.6)]'
+                      )}
+                      title="Terdapat frame aktif pada layout ini"
+                    />
                   )}
-                </div>
-                <input 
-                  type="file"
-                  ref={fileInputRef}
-                  onChange={handleFileChange}
-                  accept="image/png, image/jpeg, image/jpg"
-                  className="hidden"
-                />
-              </div>
-              
-              <button 
-                type="submit"
-                disabled={isCreating}
-                className="btn-primary w-full mt-4 flex items-center justify-center gap-3 disabled:opacity-50"
-              >
-                {editingTemplateId ? 'Commit Changes' : 'Initialize Asset'}
-                <CheckCircle2 className="w-4 h-4" />
-              </button>
-            </form>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+                </button>
+              );
+            })}
+          </div>
 
-      <div className="flex flex-col md:flex-row gap-6 justify-between items-center bg-[#0B0F19] p-6 rounded-[2rem] border border-white/5">
-        <div className="relative w-full md:w-[400px]">
-          <Search className="absolute left-6 top-1/2 -translate-y-1/2 w-4 h-4 text-emerald-400" />
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search templates portfolio..."
-            className="w-full bg-black/40 border border-white/5 rounded-2xl pl-14 pr-6 py-4 outline-none focus:border-emerald-500/40 font-black text-sm text-foreground transition-all"
-          />
-        </div>
-        <div className="flex gap-3 overflow-x-auto pb-2 w-full md:w-auto scrollbar-hide scroll-smooth">
-          {categories.map(cat => (
-            <button
-              key={cat}
-              onClick={() => setFilter(cat)}
-              className={cn(
-                "px-8 py-3 rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] transition-all whitespace-nowrap border",
-                filter === cat 
-                  ? "bg-emerald-500 text-white shadow-xl shadow-emerald-500/20 border-emerald-500" 
-                  : "bg-white/5 border-transparent text-emerald-500/40 hover:bg-white/10 hover:text-emerald-400"
-              )}
-            >
-              {cat}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="bg-[#0B0F19] border border-white/5 rounded-[3rem] overflow-hidden shadow-2xl">
-        <table className="w-full text-left border-collapse">
-          <thead>
-            <tr className="bg-black/40 border-b border-white/5">
-              <th className="px-8 py-6 text-[10px] font-black uppercase tracking-[0.4em] text-emerald-500/60">Thumbnail</th>
-              <th className="px-8 py-6 text-[10px] font-black uppercase tracking-[0.4em] text-emerald-500/60">Identity</th>
-              <th className="px-8 py-6 text-[10px] font-black uppercase tracking-[0.4em] text-emerald-500/60">Stats</th>
-              <th className="px-8 py-6 text-[10px] font-black uppercase tracking-[0.4em] text-emerald-500/60">Availability</th>
-              <th className="px-8 py-6 text-[10px] font-black uppercase tracking-[0.4em] text-emerald-500/60 text-right">Actions</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-white/5">
-            {filteredTemplates.map((template) => (
-              <motion.tr
-                key={template.id}
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                className="group hover:bg-emerald-500/5 transition-colors cursor-pointer"
-                onClick={() => setPreviewTemplate(template)}
-              >
-                <td className="px-8 py-6">
-                  <div className="w-20 h-24 bg-[#020617] rounded-xl flex items-center justify-center p-2 border border-white/5 group-hover:border-emerald-500/40 transition-all overflow-hidden relative">
-                    <div className="absolute inset-0 opacity-[0.05]" style={{ backgroundImage: 'radial-gradient(circle at 1px 1px, white 1px, transparent 0)', backgroundSize: '8px 8px' }} />
-                    <img 
-                      src={template.imageUrl} 
-                      className="max-w-full max-h-full object-contain drop-shadow-lg group-hover:scale-110 transition-transform duration-500" 
-                      alt="" 
+          {/* Main Glass Panel (Persis Nadin Gambar 2) */}
+          <div className="glass-panel rounded-3xl p-6 space-y-6 border border-white/8 bg-[#0B0F19]/90">
+            {/* Top Bar inside panel: Frame Status + Price Inputs + Create Style */}
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-2 border-b border-white/5">
+              <div className="flex flex-wrap items-center gap-5">
+                {/* Frame Status Toggle Indicator */}
+                <div
+                  className="flex items-center gap-3 cursor-default"
+                  title="Atur status aktif dari masing-masing kartu frame"
+                >
+                  <div
+                    className={cn(
+                      'w-12 h-6 rounded-full flex items-center px-1 transition-all',
+                      enabledFrameCount > 0
+                        ? 'bg-primary justify-end shadow-[0_0_15px_rgba(255,184,0,0.35)]'
+                        : 'bg-white/10 border border-white/20 justify-start'
+                    )}
+                  >
+                    <div
+                      className={cn(
+                        'w-4 h-4 rounded-full shadow-sm',
+                        enabledFrameCount > 0 ? 'bg-[#10172A]' : 'bg-muted'
+                      )}
                     />
                   </div>
-                </td>
-                <td className="px-8 py-6">
-                  <div className="space-y-1">
-                    <h4 className="text-sm font-black uppercase text-foreground">{template.name}</h4>
-                    <p className="text-[9px] font-black text-emerald-500/40 uppercase tracking-widest">{template.category}</p>
+                  <div>
+                    <p className="text-sm font-black text-foreground">Frame Status</p>
+                    <p className="text-[10px] font-bold text-muted">
+                      {enabledFrameCount} dari {templatesForLayout.length} frame aktif — pilih per frame
+                    </p>
                   </div>
-                </td>
-                <td className="px-8 py-6">
-                  <div className="space-y-1 text-left">
-                    <div className="flex items-center gap-2">
-                       <span className="text-sm font-black text-foreground">{(template.usageCount || 0).toLocaleString()}</span>
-                       <span className="text-[8px] font-black text-emerald-500/40 uppercase">Prints</span>
-                    </div>
-                  </div>
-                </td>
-                <td className="px-8 py-6">
-                  <div className={cn(
-                    "inline-flex items-center gap-2 px-4 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest border",
-                    template.status === 'active' 
-                      ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400" 
-                      : "bg-amber-500/10 border-amber-500/20 text-amber-400"
-                  )}>
-                    <div className={cn("w-1.5 h-1.5 rounded-full animate-pulse", template.status === 'active' ? "bg-emerald-400" : "bg-amber-400")} />
-                    {template.status}
-                  </div>
-                </td>
-                <td className="px-8 py-6">
-                  <div className="flex justify-end gap-3 translate-x-2 opacity-40 group-hover:opacity-100 group-hover:translate-x-0 transition-all">
-                    <button 
-                      onClick={(e) => { e.stopPropagation(); navigate('/storyboard', { state: { templateId: template.id } }); }}
-                      className="w-10 h-10 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-xl flex items-center justify-center hover:bg-emerald-500 hover:text-white transition-all shadow-xl"
-                    >
-                      <Edit3 className="w-4 h-4" />
-                    </button>
-                    <button 
-                      onClick={(e) => { e.stopPropagation(); handleEditClick(template); }}
-                      className="w-10 h-10 bg-white/5 border border-white/5 text-muted hover:text-foreground rounded-xl flex items-center justify-center hover:bg-white/10 transition-all shadow-xl"
-                    >
-                      <Pencil className="w-4 h-4" />
-                    </button>
-                    <button 
-                      onClick={(e) => { e.stopPropagation(); handleDeleteTemplate(template.id); }}
-                      className="w-10 h-10 bg-red-500/10 border border-red-500/20 text-red-500 rounded-xl flex items-center justify-center hover:bg-red-500 hover:text-white transition-all shadow-xl"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                </td>
-              </motion.tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      {/* Heavy Detail Preview Modal */}
-      <AnimatePresence>
-        {previewTemplate && (
-          <motion.div 
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onClick={() => setPreviewTemplate(null)}
-            className="fixed inset-0 z-[60] flex items-center justify-center p-12 bg-black/95 backdrop-blur-xl cursor-zoom-out"
-          >
-            <motion.div 
-              initial={{ scale: 0.8, opacity: 0, y: 50 }}
-              animate={{ scale: 1, opacity: 1, y: 0 }}
-              exit={{ scale: 0.8, opacity: 0, y: 50 }}
-              onClick={(e) => e.stopPropagation()}
-              className="relative w-full max-w-7xl h-full flex flex-col cursor-default"
-            >
-              <div className="flex justify-between items-center mb-10">
-                <div className="space-y-2">
-                  <h3 className="text-5xl font-black tracking-tighter uppercase text-foreground leading-[0.8]">{previewTemplate.name}</h3>
-                  <p className="text-primary text-[10px] font-black uppercase tracking-[0.5em]">{previewTemplate.category} Portfolio Asset</p>
                 </div>
-                <button 
-                  onClick={() => setPreviewTemplate(null)}
-                  className="p-6 bg-white/5 hover:bg-white/10 text-muted hover:text-foreground rounded-[2rem] transition-all flex items-center gap-4 text-xs font-black uppercase tracking-widest border border-white/5"
-                >
-                  <X className="w-6 h-6" /> Close Inspect
-                </button>
+
+                {/* Price Inputs & Button */}
+                <div className="flex flex-wrap items-center gap-2 border-l border-white/10 pl-5">
+                  <label
+                    className="text-[10px] font-black uppercase tracking-widest text-muted"
+                    htmlFor="layout-frame-price"
+                  >
+                    Harga Digital (Rp)
+                  </label>
+                  <input
+                    id="layout-frame-price"
+                    type="number"
+                    min="1"
+                    step="1"
+                    value={layoutPrice}
+                    onChange={e => setLayoutPrice(e.target.value)}
+                    placeholder="Contoh: 1500"
+                    className="w-28 bg-black/30 border border-white/10 rounded-lg px-2.5 py-2 text-xs font-bold text-foreground outline-none focus:border-primary/50"
+                  />
+
+                  <label
+                    className="text-[10px] font-black uppercase tracking-widest text-muted"
+                    htmlFor="layout-print-price"
+                  >
+                    Harga Digital &amp; Print (Rp)
+                  </label>
+                  <input
+                    id="layout-print-price"
+                    type="number"
+                    min="1"
+                    step="1"
+                    value={layoutPrintPrice}
+                    onChange={e => setLayoutPrintPrice(e.target.value)}
+                    placeholder="Contoh: 3000"
+                    className="w-28 bg-black/30 border border-white/10 rounded-lg px-2.5 py-2 text-xs font-bold text-foreground outline-none focus:border-primary/50"
+                  />
+
+                  <button
+                    type="button"
+                    onClick={handleSaveAllPrices}
+                    className="px-3 py-2 rounded-lg bg-primary/15 border border-primary/30 text-primary text-[10px] font-black uppercase tracking-wider hover:bg-primary/25 transition-all cursor-pointer"
+                  >
+                    Simpan ke Semua Frame
+                  </button>
+                </div>
               </div>
-              
-              <div className="flex-1 bg-[#1E293B] border border-white/5 rounded-[4rem] shadow-2xl flex items-center justify-center overflow-hidden p-20 relative group">
-                {/* Visual Backdrop pattern */}
-                <div className="absolute inset-0 opacity-[0.02]" style={{ backgroundImage: 'radial-gradient(circle at 2px 2px, white 2px, transparent 0)', backgroundSize: '40px 40px' }} />
-                
-                <img 
-                  src={previewTemplate.imageUrl} 
-                  alt={previewTemplate.name} 
-                  className="max-w-full max-h-full object-contain relative z-10 drop-shadow-[0_40px_80px_rgba(0,0,0,0.6)] group-hover:scale-105 transition-transform duration-1000"
-                  referrerPolicy="no-referrer"
+
+              {/* Create Style Button */}
+              <button
+                type="button"
+                onClick={handleCreateClick}
+                className="flex items-center gap-2 px-4 py-2 bg-white/5 border border-white/10 hover:border-primary/40 hover:bg-primary/10 text-foreground hover:text-primary text-[11px] font-black uppercase tracking-wider rounded-xl transition-all cursor-pointer self-start lg:self-center"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                Create Style
+              </button>
+            </div>
+
+            {/* Secondary Filter Bar Dian: Kategori Event & Search */}
+            <div className="flex flex-col md:flex-row items-center justify-between gap-3 pt-1">
+              <div className="flex items-center gap-1.5 overflow-x-auto w-full md:w-auto scrollbar-hide py-1">
+                <span className="text-[9px] font-black uppercase tracking-widest text-muted mr-1">
+                  Kategori:
+                </span>
+                {['All', ...EVENT_CATEGORIES].map(cat => (
+                  <button
+                    key={cat}
+                    type="button"
+                    onClick={() => setSelectedCategory(cat)}
+                    className={cn(
+                      'px-3 py-1 rounded-lg text-[9px] font-black uppercase tracking-wider transition-all whitespace-nowrap cursor-pointer',
+                      selectedCategory.toLowerCase() === cat.toLowerCase()
+                        ? 'bg-emerald-500 text-white shadow-md shadow-emerald-500/20'
+                        : 'bg-white/5 text-muted hover:text-foreground hover:bg-white/10'
+                    )}
+                  >
+                    {cat}
+                  </button>
+                ))}
+              </div>
+
+              {/* Search Bar */}
+              <div className="relative w-full md:w-60">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted" />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={e => setSearchQuery(e.target.value)}
+                  placeholder="Cari style frame..."
+                  className="w-full bg-black/40 border border-white/10 rounded-xl pl-9 pr-3 py-1.5 text-xs text-foreground placeholder:text-muted/60 outline-none focus:border-primary/50"
                 />
               </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+            </div>
+
+            {/* Available Styles Grid */}
+            <div className="space-y-4 pt-2">
+              <p className="text-[10px] font-black uppercase tracking-widest text-muted">
+                Available Styles ({filteredTemplates.length})
+              </p>
+
+              {loading ? (
+                <div className="flex flex-col items-center justify-center py-20 gap-3">
+                  <Loader2 className="w-8 h-8 animate-spin text-primary" />
+                  <p className="text-xs font-bold text-muted">Memuat frame dari backend online...</p>
+                </div>
+              ) : templatesForLayout.length === 0 ? (
+                /* Empty state jika belum ada style sama sekali pada preset ini */
+                <div className="flex flex-col items-center justify-center py-16 border border-dashed border-white/10 rounded-2xl gap-4 text-center">
+                  <div className="w-14 h-14 bg-white/5 rounded-2xl flex items-center justify-center">
+                    <ImageIcon className="w-7 h-7 text-muted opacity-40" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-black text-foreground">No Styles Yet</p>
+                    <p className="text-xs text-muted mt-1">
+                      Create your first frame style for {activePreset.label} ({activePreset.width}×{activePreset.height})
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleCreateClick}
+                    className="flex items-center gap-2 px-5 py-2.5 bg-primary/15 border border-primary/40 text-primary text-[11px] font-black uppercase tracking-wider rounded-xl hover:bg-primary/25 transition-all cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    Create First Style
+                  </button>
+                </div>
+              ) : (
+                /* Grid Frame Cards Nadin */
+                <AnimatePresence mode="wait">
+                  <motion.div
+                    key={`${activeLayoutId}-${selectedCategory}-${searchQuery}`}
+                    initial={{ opacity: 0, y: 6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -6 }}
+                    transition={{ duration: 0.15 }}
+                    className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4"
+                  >
+                    {filteredTemplates.map(template => (
+                      <FrameCard
+                        key={template.id}
+                        template={template}
+                        preset={activePreset}
+                        onEdit={() => handleEditClick(template)}
+                        onDuplicate={() => handleDuplicateClick(template)}
+                        onDelete={() => handleDeleteClick(template)}
+                        onToggle={() => handleToggleActive(template)}
+                        onOpenStoryboard={() => handleOpenStoryboard(template)}
+                      />
+                    ))}
+
+                    {/* Add New Style Card (Persis Nadin Gambar 2) */}
+                    <motion.button
+                      type="button"
+                      onClick={handleCreateClick}
+                      className="rounded-2xl border-2 border-dashed border-white/10 hover:border-primary/50 hover:bg-primary/5 flex flex-col items-center justify-center gap-2 transition-all h-[275px] group cursor-pointer"
+                    >
+                      <div className="w-9 h-9 rounded-xl bg-white/5 group-hover:bg-primary/10 border border-white/10 group-hover:border-primary/30 flex items-center justify-center transition-all">
+                        <Plus className="w-5 h-5 text-muted group-hover:text-primary transition-colors" />
+                      </div>
+                      <p className="text-[10px] font-black uppercase tracking-wider text-muted group-hover:text-primary transition-colors">
+                        New Style
+                      </p>
+                    </motion.button>
+                  </motion.div>
+                </AnimatePresence>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ======================================================================== */}
+      {/* TAB 2: STICKER LIBRARY (DIAN STICKER ASSETS MANAGEMENT)                   */}
+      {/* ======================================================================== */}
+      {activeMainTab === 'stickers' && (
+        <div className="space-y-6">
+          <div className="glass-panel rounded-3xl p-6 space-y-6 border border-white/8 bg-[#0B0F19]/90">
+            {/* Header Sticker Library */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-white/5">
+              <div>
+                <h2 className="text-xl font-bold text-foreground flex items-center gap-2">
+                  <Sparkles className="w-5 h-5 text-emerald-400" />
+                  Sticker &amp; Asset Library
+                </h2>
+                <p className="text-xs text-muted mt-0.5">
+                  Katalog stiker, logo, dan overlay reusable yang dapat disematkan ke seluruh template frame.
+                </p>
+              </div>
+
+              {/* Upload Sticker Button (Safeguarded) */}
+              <div className="relative group self-start sm:self-auto">
+                <button
+                  type="button"
+                  disabled
+                  className="flex items-center gap-2 px-4 py-2 bg-emerald-500/20 border border-emerald-500/30 text-emerald-400/50 rounded-xl text-[11px] font-black uppercase tracking-wider cursor-not-allowed"
+                >
+                  <Lock className="w-3.5 h-3.5" />
+                  Upload Stiker Baru
+                </button>
+                <div className="absolute right-0 top-full mt-2 w-64 p-3 bg-[#1E293B] border border-emerald-500/30 rounded-xl shadow-2xl text-[9px] text-emerald-200 hidden group-hover:block z-50 pointer-events-none">
+                  <p className="font-bold text-emerald-400 mb-1">Mode Read-Only</p>
+                  Upload aset massal pada halaman utama dinonaktifkan untuk melindungi server backend produksi.
+                </div>
+              </div>
+            </div>
+
+            {/* Filter by Type & Search */}
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
+              <div className="flex items-center gap-1.5">
+                {[
+                  { id: 'all', label: 'Semua Aset' },
+                  { id: 'sticker', label: 'Stiker' },
+                  { id: 'logo', label: 'Logo' },
+                  { id: 'overlay', label: 'Overlay' },
+                ].map(tab => (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => setStickerFilterType(tab.id)}
+                    className={cn(
+                      'px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer',
+                      stickerFilterType === tab.id
+                        ? 'bg-emerald-500 text-white shadow-md shadow-emerald-500/20'
+                        : 'bg-white/5 text-muted hover:text-foreground hover:bg-white/10'
+                    )}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+
+              <div className="relative w-full sm:w-64">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted" />
+                <input
+                  type="text"
+                  value={stickerSearch}
+                  onChange={e => setStickerSearch(e.target.value)}
+                  placeholder="Cari stiker atau logo..."
+                  className="w-full bg-black/40 border border-white/10 rounded-xl pl-9 pr-3 py-1.5 text-xs text-foreground placeholder:text-muted/60 outline-none focus:border-emerald-500/50"
+                />
+              </div>
+            </div>
+
+            {/* Assets Grid */}
+            {stickersLoading ? (
+              <div className="flex flex-col items-center justify-center py-20 gap-3">
+                <Loader2 className="w-8 h-8 animate-spin text-emerald-400" />
+                <p className="text-xs font-bold text-muted">Memuat katalog stiker...</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+                {stickersList
+                  .filter(
+                    a =>
+                      (stickerFilterType === 'all' || a.type === stickerFilterType) &&
+                      (!stickerSearch.trim() ||
+                        a.name.toLowerCase().includes(stickerSearch.toLowerCase().trim()))
+                  )
+                  .map(asset => (
+                    <div
+                      key={asset.id}
+                      className="p-3 bg-black/40 border border-white/5 hover:border-emerald-500/40 rounded-2xl flex flex-col items-center gap-2 transition-all group"
+                    >
+                      <div className="w-full h-28 rounded-xl bg-black/60 border border-white/5 flex items-center justify-center p-2 overflow-hidden">
+                        <img
+                          src={resolveAssetUrl(asset.url)}
+                          alt={asset.name}
+                          className="max-w-full max-h-full object-contain group-hover:scale-110 transition-transform duration-200"
+                          onError={e => {
+                            (e.target as HTMLElement).style.display = 'none';
+                          }}
+                        />
+                      </div>
+                      <div className="w-full text-center">
+                        <p className="text-[10px] font-bold text-foreground truncate">{asset.name}</p>
+                        <span className="text-[8px] font-black uppercase tracking-wider text-emerald-400/80 bg-emerald-500/10 px-2 py-0.5 rounded-full mt-1 inline-block">
+                          {asset.type}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 };
