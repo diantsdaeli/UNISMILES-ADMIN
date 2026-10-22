@@ -17,7 +17,8 @@
     "test:revisions": "tsx tests/stage3e_revisions.test.ts",
     "test:stage3g": "tsx tests/stage3g_safe_staging.test.ts",
     "test:stage4": "tsx tests/stage4_printer_ui.test.ts",
-    "test": "tsx tests/stage2_fixes.test.ts && tsx tests/stage3b_safeguard.test.ts && tsx tests/stage3c_isolated_integration.test.ts && tsx tests/stage3d_asset_integration.test.ts && tsx tests/stage3e_e2e_compatibility.test.ts && tsx tests/stage3e_revisions.test.ts && tsx tests/stage3g_safe_staging.test.ts && tsx tests/stage4_printer_ui.test.ts"
+    "test:stage4c": "tsx tests/stage4c_printer_simulation.test.ts",
+    "test": "tsx tests/stage2_fixes.test.ts && tsx tests/stage3b_safeguard.test.ts && tsx tests/stage3c_isolated_integration.test.ts && tsx tests/stage3d_asset_integration.test.ts && tsx tests/stage3e_e2e_compatibility.test.ts && tsx tests/stage3e_revisions.test.ts && tsx tests/stage3g_safe_staging.test.ts && tsx tests/stage4_printer_ui.test.ts && tsx tests/stage4c_printer_simulation.test.ts"
   },
   "dependencies": {
     "@google/genai": "^1.29.0",

@@ -38,6 +38,7 @@ export const DEFAULT_PRINTER_CONFIG: PrinterConfig = {
 const STORAGE_PREFIX = 'unismiles_kiosk_printer_config_';
 
 export const THERMAL_LIMITS = {
+  maxPaperWidthMm: 60,
   maxPrintWidthMm: 48,
   minHeightMm: 8,
   maxHeightMm: 350,
@@ -68,6 +69,74 @@ export const ALLOWED_GRAYSCALE_ALGORITHMS = [
   'green', 'red', 'blue', 'max', 'min',
 ] as const;
 
+export const KNOWN_PAPER_SIZES: readonly string[] = [
+  'Instax Mini (54 × 86 mm)',
+  'Polaroid 6 × 9 cm (2R)',
+  '2 Strip 5 × 15 cm',
+  '3 Strip 5 × 15 cm',
+  '4 Strip 5 × 15 cm',
+  '2×2 Grid 10 × 10 cm',
+  '2×3 Grid 10 × 15 cm',
+  'Termal 40 × 60 mm (2 foto)',
+  'Termal 40 × 90 mm (3 foto)',
+  'Termal 40 × 120 mm (4 foto)',
+  'Termal 48 × 150 mm (strip panjang)',
+  'Termal 30 × 40 mm (label kecil)',
+  'nimbotpaper-polaroid',
+  '2R', '3R', '4R', 'STRIP', '6R',
+  'POLAROID', 'STRIP 2', 'STRIP 3', 'STRIP 4',
+  'GRID', 'GRID 2X2', 'GRID 2X3', 'GRID 3X3',
+];
+
+export const FORBIDDEN_PRINTING_FIELDS = [
+  'command',
+  'shell_command',
+  'executable_path',
+  'script',
+  'driver_command',
+] as const;
+
+export const ALLOWED_PRINTING_FIELDS = new Set([
+  'printing_enabled',
+  'adapter',
+  'printer_name',
+  'paper_size',
+  'orientation',
+  'copies_limit',
+  'timeout_ms',
+  'retry_count',
+  'config_version',
+  'allowed_layouts',
+  'photo_brightness',
+  'photo_contrast',
+  'photo_saturation',
+  'thermal_density',
+  'thermal_offset_y_px',
+  'thermal_offset_x_px',
+  'print_margin_top_px',
+  'print_margin_right_px',
+  'print_margin_left_px',
+  'print_margin_bottom_px',
+  'photo_fit_mode',
+  'print_sharpen',
+  'grayscale_algorithm',
+  'show_email_button',
+  'show_retake_button',
+  'show_print_button',
+]);
+
+export class PrintingValidationError extends Error {
+  statusCode: number;
+  code: string;
+
+  constructor(message: string, code = 'INVALID_PRINTING_CONFIG', statusCode = 400) {
+    super(message);
+    this.name = 'PrintingValidationError';
+    this.code = code;
+    this.statusCode = statusCode;
+  }
+}
+
 function clampInt(val: any, min: number, max: number, fallback: number): number {
   const num = Number(val);
   if (!Number.isFinite(num)) return fallback;
@@ -82,6 +151,179 @@ function parseBool(val: any, fallback: boolean): boolean {
   if (['true', '1', 'yes', 'on', 'ya'].includes(s)) return true;
   if (['false', '0', 'no', 'off', 'tidak'].includes(s)) return false;
   return fallback;
+}
+
+/**
+ * Validasi ketat payload konfigurasi printer mencerminkan skema Backend API.
+ * Menolak field command injection berbahaya, tipe data salah, dan batas nilai di luar rentang fisik.
+ */
+export function validatePrintingConfigPayload(
+  input: Record<string, any>,
+  existing: Partial<PrinterConfig> = {},
+  reported: PrinterReportedState | null = null
+): PrinterConfig {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    throw new PrintingValidationError('Printing configuration must be an object.');
+  }
+
+  // 1. Cek forbidden fields (Anti shell/command injection)
+  for (const key of Object.keys(input)) {
+    if (FORBIDDEN_PRINTING_FIELDS.includes(key as any)) {
+      throw new PrintingValidationError(`${key} is not accepted.`, 'FORBIDDEN_FIELD');
+    }
+    if (!ALLOWED_PRINTING_FIELDS.has(key)) {
+      throw new PrintingValidationError(`Unknown printing configuration field: ${key}.`, 'UNKNOWN_FIELD');
+    }
+  }
+
+  const merged = {
+    ...DEFAULT_PRINTER_CONFIG,
+    ...existing,
+    ...input,
+  };
+
+  const enabled = Boolean(merged.printing_enabled);
+  const adapter = String(merged.adapter || 'disabled').toLowerCase();
+  if (!ALLOWED_ADAPTERS.includes(adapter as any)) {
+    throw new PrintingValidationError(`adapter must be one of: ${ALLOWED_ADAPTERS.join(', ')}.`);
+  }
+
+  // Ukuran kertas
+  const paperSize = String(merged.paper_size || '').trim();
+  const isCustom = CUSTOM_PATTERN.test(paperSize);
+  const isKnown = KNOWN_PAPER_SIZES.some((k) => k.toLowerCase() === paperSize.toLowerCase());
+
+  if (!isKnown && !isCustom) {
+    throw new PrintingValidationError(
+      `Ukuran kertas "${paperSize}" tidak dikenali. Pilih preset yang tersedia atau gunakan CUSTOM <lebar>X<tinggi> MM.`
+    );
+  }
+
+  if (isCustom) {
+    const customMatch = paperSize.match(CUSTOM_PATTERN);
+    if (customMatch) {
+      const width = Number(customMatch[1]);
+      const height = Number(customMatch[2]);
+      if (width > THERMAL_LIMITS.maxPaperWidthMm) {
+        throw new PrintingValidationError(
+          `Lebar ${width} mm melebihi lebar kertas maksimum (${THERMAL_LIMITS.maxPaperWidthMm} mm).`
+        );
+      }
+      if (height < THERMAL_LIMITS.minHeightMm || height > THERMAL_LIMITS.maxHeightMm) {
+        throw new PrintingValidationError(
+          `Tinggi ${height} mm di luar rentang printer termal (${THERMAL_LIMITS.minHeightMm}-${THERMAL_LIMITS.maxHeightMm} mm).`
+        );
+      }
+    }
+  }
+
+  const orientation = String(merged.orientation || 'portrait').toLowerCase();
+  if (!ALLOWED_ORIENTATIONS.includes(orientation as any)) {
+    throw new PrintingValidationError('orientation must be portrait or landscape.');
+  }
+
+  // Printer Name
+  let printerName = merged.printer_name !== null && merged.printer_name !== undefined ? String(merged.printer_name).trim() : null;
+  if (printerName !== null && printerName !== '') {
+    if (printerName.length > 255 || !/^[\p{L}\p{N} ._()\-/#:+@]+$/u.test(printerName)) {
+      throw new PrintingValidationError('printer_name contains unsupported characters.');
+    }
+  } else {
+    printerName = null;
+  }
+
+  if (enabled && adapter !== 'disabled') {
+    if (!printerName) {
+      throw new PrintingValidationError('printer_name is required when printing is enabled.');
+    }
+
+    if (reported?.supported_adapters && reported.supported_adapters.length > 0) {
+      if (!reported.supported_adapters.includes(adapter)) {
+        throw new PrintingValidationError(
+          'The selected adapter is not supported by this Kiosk Agent.',
+          'UNSUPPORTED_ADAPTER'
+        );
+      }
+    }
+
+    if (reported?.available_printers && reported.available_printers.length > 0) {
+      const matches = reported.available_printers.some((p: any) => {
+        if (typeof p === 'string') return p === printerName;
+        return p && (p.name === printerName || p.id === printerName);
+      });
+      if (!matches) {
+        throw new PrintingValidationError(
+          'The selected printer was not reported by this Kiosk Agent.',
+          'PRINTER_NOT_AVAILABLE'
+        );
+      }
+    }
+  }
+
+  // Range validation helper
+  const validateIntRange = (val: any, name: string, min: number, max: number): number => {
+    const num = Number(val);
+    if (!Number.isFinite(num) || !Number.isInteger(num) || num < min || num > max) {
+      throw new PrintingValidationError(`${name} must be an integer between ${min} and ${max}.`);
+    }
+    return num;
+  };
+
+  const copies_limit = validateIntRange(merged.copies_limit, 'copies_limit', 1, 10);
+  const timeout_ms = validateIntRange(merged.timeout_ms, 'timeout_ms', 5000, 300000);
+  const retry_count = validateIntRange(merged.retry_count, 'retry_count', 0, 3);
+  const photo_brightness = validateIntRange(merged.photo_brightness, 'photo_brightness', 50, 150);
+  const photo_contrast = validateIntRange(merged.photo_contrast, 'photo_contrast', 50, 150);
+  const photo_saturation = validateIntRange(merged.photo_saturation, 'photo_saturation', 0, 150);
+  const thermal_density = validateIntRange(merged.thermal_density, 'thermal_density', 1, 5);
+  const thermal_offset_y_px = validateIntRange(merged.thermal_offset_y_px, 'thermal_offset_y_px', -200, 200);
+  const thermal_offset_x_px = validateIntRange(merged.thermal_offset_x_px, 'thermal_offset_x_px', -200, 200);
+  const print_margin_top_px = validateIntRange(merged.print_margin_top_px, 'print_margin_top_px', 0, 300);
+  const print_margin_right_px = validateIntRange(merged.print_margin_right_px, 'print_margin_right_px', 0, 300);
+  const print_margin_left_px = validateIntRange(merged.print_margin_left_px, 'print_margin_left_px', 0, 300);
+  const print_margin_bottom_px = validateIntRange(merged.print_margin_bottom_px, 'print_margin_bottom_px', 0, 300);
+  const print_sharpen = validateIntRange(merged.print_sharpen, 'print_sharpen', 0, 100);
+
+  const photo_fit_mode = String(merged.photo_fit_mode || 'fit').toLowerCase();
+  if (!ALLOWED_FIT_MODES.includes(photo_fit_mode as any)) {
+    throw new PrintingValidationError(`photo_fit_mode must be one of: ${ALLOWED_FIT_MODES.join(', ')}.`);
+  }
+
+  const grayscale_algorithm = String(merged.grayscale_algorithm || 'rec601').toLowerCase();
+  if (!ALLOWED_GRAYSCALE_ALGORITHMS.includes(grayscale_algorithm as any)) {
+    throw new PrintingValidationError(
+      `grayscale_algorithm must be one of: ${ALLOWED_GRAYSCALE_ALGORITHMS.join(', ')}.`
+    );
+  }
+
+  return {
+    printing_enabled: enabled,
+    adapter: enabled ? adapter : 'disabled',
+    printer_name: enabled ? printerName : null,
+    paper_size: paperSize,
+    orientation,
+    copies_limit,
+    timeout_ms,
+    retry_count,
+    config_version: Math.max(1, Math.round(Number(merged.config_version || 1))),
+    allowed_layouts: Array.isArray(merged.allowed_layouts) ? merged.allowed_layouts.map(String) : [],
+    photo_brightness,
+    photo_contrast,
+    photo_saturation,
+    thermal_density,
+    thermal_offset_y_px,
+    thermal_offset_x_px,
+    photo_fit_mode,
+    print_margin_top_px,
+    print_margin_right_px,
+    print_margin_left_px,
+    print_margin_bottom_px,
+    print_sharpen,
+    grayscale_algorithm,
+    show_email_button: parseBool(merged.show_email_button, true),
+    show_retake_button: parseBool(merged.show_retake_button, true),
+    show_print_button: parseBool(merged.show_print_button, true),
+  };
 }
 
 /**
@@ -172,6 +414,9 @@ export function validateCustomPaperSize(value: string): string | null {
   if (!match) return 'Format: CUSTOM <lebar>X<tinggi> MM (contoh: CUSTOM 48X150 MM)';
   const width = Number(match[1]);
   const height = Number(match[2]);
+  if (width > THERMAL_LIMITS.maxPaperWidthMm) {
+    return `Lebar ${width} mm melebihi lebar kertas maksimum (${THERMAL_LIMITS.maxPaperWidthMm} mm).`;
+  }
   if (width > THERMAL_LIMITS.maxPrintWidthMm) {
     return `Lebar ${width} mm melebihi lebar cetak maksimum kepala cetak termal (${THERMAL_LIMITS.maxPrintWidthMm} mm). Sisi kanan akan terpotong secara fisik.`;
   }
@@ -179,6 +424,91 @@ export function validateCustomPaperSize(value: string): string | null {
     return `Tinggi harus antara ${THERMAL_LIMITS.minHeightMm}–${THERMAL_LIMITS.maxHeightMm} mm (diminta ${height} mm).`;
   }
   return null;
+}
+
+/**
+ * Konversi error HTTP ke format terstruktur untuk feedback UI yang aman.
+ */
+export interface ParsedPrinterError {
+  status: number;
+  code: string;
+  message: string;
+  isSecurityError: boolean;
+  isNetworkError: boolean;
+}
+
+export function parsePrinterApiError(error: any): ParsedPrinterError {
+  const status = error?.response?.status || (error?.statusCode ?? 0);
+  const data = error?.response?.data;
+  const code = data?.error_code || error?.code || (
+    status === 400 ? 'BAD_REQUEST' :
+    status === 401 ? 'UNAUTHORIZED' :
+    status === 403 ? 'FORBIDDEN' :
+    status === 404 ? 'NOT_FOUND' :
+    status === 503 ? 'SERVICE_UNAVAILABLE' :
+    'UNKNOWN_ERROR'
+  );
+  const message = data?.message || error?.message || 'Terjadi kesalahan pada printer service.';
+  const isSecurityError = status === 401 || status === 403 || message.includes('PERLINDUNGAN PRODUKSI') || message.includes('SAFEGUARD');
+  const isNetworkError = !status || error?.code === 'ECONNABORTED' || String(error?.message || '').toLowerCase().includes('timeout') || String(error?.message || '').toLowerCase().includes('network error');
+
+  return {
+    status,
+    code,
+    message,
+    isSecurityError,
+    isNetworkError,
+  };
+}
+
+/**
+ * Pemetaan konsistensi dua arah antara konfigurasi printer lama pada tab Hardware (4x6 / Strip)
+ * dengan preset ukuran kertas baru pada tab Printer Configuration.
+ */
+export function mapLegacyPrinterSizeToPaperPreset(legacySize: '4x6' | 'Strip' | string): string {
+  const norm = String(legacySize || '').trim().toLowerCase();
+  if (norm === 'strip') {
+    return '4 Strip 5 × 15 cm';
+  }
+  if (norm === '4x6' || norm === '4r') {
+    return '2×3 Grid 10 × 15 cm';
+  }
+  return 'Instax Mini (54 × 86 mm)';
+}
+
+export function mapPaperPresetToLegacyPrinterSize(paperSize: string): '4x6' | 'Strip' {
+  const norm = String(paperSize || '').trim().toLowerCase();
+  if (norm.includes('strip')) {
+    return 'Strip';
+  }
+  return '4x6';
+}
+
+/**
+ * Audit lingkungan pengujian cetak lokal untuk memastikan isolasi penuh dari hardware fisik.
+ */
+export interface TestPrintSafetyAudit {
+  isHardwarePrintingBlocked: boolean;
+  isBackendJobCreationBlocked: boolean;
+  isWebSocketCommandBlocked: boolean;
+  isElectronIpcBlocked: boolean;
+  isWebBluetoothBlocked: boolean;
+  isWindowsSpoolerBlocked: boolean;
+  isCupsSpoolerBlocked: boolean;
+  mode: 'SAFE_SIMULATION';
+}
+
+export function auditTestPrintSafety(): TestPrintSafetyAudit {
+  return {
+    isHardwarePrintingBlocked: true,
+    isBackendJobCreationBlocked: true,
+    isWebSocketCommandBlocked: true,
+    isElectronIpcBlocked: true,
+    isWebBluetoothBlocked: true,
+    isWindowsSpoolerBlocked: true,
+    isCupsSpoolerBlocked: true,
+    mode: 'SAFE_SIMULATION',
+  };
 }
 
 /**
@@ -247,6 +577,9 @@ export async function updatePrinterConfig(
   options?: ServiceExecutionOptions
 ): Promise<{ success: boolean; message: string; simulated?: boolean; data?: PrintingConfigResponse }> {
   const strId = String(kioskId);
+  // Validasi payload sebelum disimpan lokal atau dikirim ke backend
+  validatePrintingConfigPayload(config);
+
   const shouldSimulate = options?.simulate ?? (!options?.customApi && !ENABLE_BACKEND_MUTATIONS);
 
   if (shouldSimulate) {

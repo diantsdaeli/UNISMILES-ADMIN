@@ -73,8 +73,8 @@ export const PHOTO_DYESUB_PROFILE: PrinterProfile = {
   maxPrintWidthMm: 152,
   minHeightMm: 50,
   maxHeightMm: 230,
-  isVerifiedHardware: true,
-  verificationSource: 'Standar industri printer foto (DNP / Citizen / Sinfonia 300 DPI).',
+  isVerifiedHardware: false,
+  verificationSource: 'Estimasi Simulasi (Profil Standar Industri — Memerlukan Verifikasi Fisik).',
 };
 
 export function resolvePrinterProfile(
