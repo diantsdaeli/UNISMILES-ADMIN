@@ -318,3 +318,6 @@ export const useKiosks = () => {
   }
   return context;
 };
+
+export const useKiosk = useKiosks;
+

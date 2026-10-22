@@ -1,88 +1,111 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback } from 'react';
+import { useAuth } from './components/AuthProvider';
+import { useKiosk } from './KioskContext';
+import { 
+  SessionItem, 
+  SessionPhoto, 
+  fetchSessionsService, 
+  filterSessionsByRole, 
+  SEED_SESSIONS 
+} from './lib/sessionService';
 
-export interface Session {
-  id: string;
-  timestamp: string;
-  template: string;
-  photos: string[];
-  amount: number;
-  status: string;
-}
+// Kompatibilitas mundur dengan tipe legacy
+export type Session = SessionItem;
+export type { SessionPhoto };
 
 interface SessionContextType {
-  sessions: Session[];
+  sessions: SessionItem[];
+  allSessions: SessionItem[]; // Koleksi mentah sebelum filter role
   loading: boolean;
+  error: string | null;
+  isSimulated: boolean;
+  fetchSessions: () => Promise<void>;
+  refreshSessions: () => void;
 }
 
 const SessionContext = createContext<SessionContextType | undefined>(undefined);
 
-const DUMMY_SESSIONS: Session[] = [
-  {
-    id: '#US-8821',
-    timestamp: '2026-04-01T10:15:00',
-    template: 'Gold Birthday',
-    photos: ['https://picsum.photos/seed/8821/200/300'],
-    amount: 35000,
-    status: 'Success'
-  },
-  {
-    id: '#US-8822',
-    timestamp: '2026-04-01T11:20:00',
-    template: 'Toy Story Kids',
-    photos: ['https://picsum.photos/seed/8822/200/300'],
-    amount: 25000,
-    status: 'Success'
-  },
-  {
-    id: '#US-8823',
-    timestamp: '2026-04-01T13:45:00',
-    template: 'Graduation Theme',
-    photos: ['https://picsum.photos/seed/8823/200/300'],
-    amount: 35000,
-    status: 'Failed (Paper Jam)'
-  },
-  {
-    id: '#US-8824',
-    timestamp: '2026-04-01T15:10:00',
-    template: 'Gold Birthday',
-    photos: ['https://picsum.photos/seed/8824/200/300'],
-    amount: 35000,
-    status: 'Success'
-  },
-  {
-    id: '#US-8825',
-    timestamp: '2026-04-01T16:30:00',
-    template: 'Toy Story Kids',
-    photos: ['https://picsum.photos/seed/8825/200/300'],
-    amount: 25000,
-    status: 'Success'
-  }
-];
-
 export const SessionProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const [sessions, setSessions] = useState<Session[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { user, isAuthenticated, loading: authLoading } = useAuth();
+  const { kiosks } = useKiosk();
 
-  // Fetch Sessions on mount
-  useEffect(() => {
-    async function fetchSessions() {
-      try {
-        const res = await fetch("/api/sessions");
-        if (res.ok) {
-          const data = await res.json();
-          setSessions(data);
-        }
-      } catch (err) {
-        console.error("Error fetching sessions:", err);
-      } finally {
-        setLoading(false);
+  const [rawSessions, setRawSessions] = useState<SessionItem[]>([]);
+  const [filteredSessions, setFilteredSessions] = useState<SessionItem[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
+  const [isSimulated, setIsSimulated] = useState<boolean>(true);
+
+  const fetchSessions = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      
+      const loaded = await fetchSessionsService();
+      const hasSimulatedMarker = loaded.some(s => s.isSimulated);
+      setIsSimulated(hasSimulatedMarker || loaded.length === 0);
+      setRawSessions(loaded);
+    } catch (err: any) {
+      console.error('[SessionContext] Error loading sessions:', err);
+      const status = err?.response?.status || err?.status;
+      if (status === 401 || status === 403) {
+        // DILARANG fallback ke mock saat 401/403
+        setError(`Akses ditolak atau sesi login kedaluwarsa (HTTP ${status}). Silakan login kembali.`);
+        setRawSessions([]);
+        setFilteredSessions([]);
+        setIsSimulated(false);
+      } else {
+        setError(err?.message || 'Gagal memuat daftar sesi');
+        setRawSessions(SEED_SESSIONS);
+        setIsSimulated(true);
       }
+    } finally {
+      setLoading(false);
     }
-    fetchSessions();
   }, []);
 
+  // Sinkronisasi Sesi saat autentikasi berubah (Logout menghapus state sesi)
+  useEffect(() => {
+    if (authLoading) return;
+
+    if (!isAuthenticated) {
+      setRawSessions([]);
+      setFilteredSessions([]);
+      setError(null);
+      setLoading(false);
+      return;
+    }
+
+
+    fetchSessions();
+  }, [isAuthenticated, authLoading, fetchSessions]);
+
+  // Evaluasi RBAC Multi-Kiosk Isolation secara reaktif
+  useEffect(() => {
+    if (!isAuthenticated || !user) {
+      setFilteredSessions([]);
+      return;
+    }
+
+    const isolated = filterSessionsByRole(rawSessions, user, kiosks);
+    setFilteredSessions(isolated);
+  }, [rawSessions, user, kiosks, isAuthenticated]);
+
+  const refreshSessions = useCallback(() => {
+    fetchSessions();
+  }, [fetchSessions]);
+
   return (
-    <SessionContext.Provider value={{ sessions, loading }}>
+    <SessionContext.Provider
+      value={{
+        sessions: filteredSessions,
+        allSessions: rawSessions,
+        loading,
+        error,
+        isSimulated,
+        fetchSessions,
+        refreshSessions,
+      }}
+    >
       {children}
     </SessionContext.Provider>
   );
