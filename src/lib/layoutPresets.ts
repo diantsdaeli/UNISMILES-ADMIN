@@ -1,4 +1,13 @@
-import { CanvasLayoutConfig, GradientStop, TextElement, AssetElement, PhotoSlot } from './templates';
+import {
+  CanvasLayoutConfig,
+  GradientStop,
+  TextElement,
+  AssetElement,
+  PhotoSlot,
+  CreateTemplatePayload,
+  UpdateTemplatePayload,
+  Template,
+} from './templates';
 import { toStoredAssetPath } from './urls';
 
 export interface LayoutPreset {
@@ -352,5 +361,123 @@ export function buildFrameConfig(
     }),
     overlayUrl: toStoredAssetPath(overlayUrl),
     overlayAssetId,
+  };
+}
+
+export interface FrameEditorState {
+  preset: LayoutPreset;
+  name: string;
+  category: EventCategory;
+  frameType: 'color' | 'gradient' | 'png';
+  bgColor: string;
+  accentColor: string;
+  gradientStops: GradientStop[];
+  gradientAngle: number;
+  gradientStyle: 'linear' | 'radial';
+  textElements: TextElement[];
+  assetElements: AssetElement[];
+  bgImageUrl?: string;
+  overlayAssetId?: string | number | null;
+  digitalPrice?: number | string;
+  digitalPrintPrice?: number | string;
+  customSlots?: PhotoSlot[];
+  isActive?: boolean;
+}
+
+/**
+ * Menyusun payload untuk Create Frame Baru (POST /api/v1/admin/templates/generate)
+ */
+export function buildCreateTemplatePayload(state: FrameEditorState): CreateTemplatePayload {
+  const dPrice = Number(state.digitalPrice) || 0;
+  const dpPrice = Number(state.digitalPrintPrice) || dPrice;
+  const frameConfig = buildFrameConfig(
+    state.preset,
+    state.category,
+    state.frameType,
+    state.bgColor,
+    state.accentColor,
+    state.gradientStops,
+    state.gradientAngle,
+    state.gradientStyle,
+    state.textElements,
+    state.bgImageUrl || '',
+    state.overlayAssetId || null,
+    state.assetElements,
+    state.customSlots,
+    null
+  );
+
+  return {
+    name: state.name.trim(),
+    layout_id: state.preset.id,
+    slot_count: state.preset.slots,
+    price: dPrice,
+    digital_price: dPrice,
+    digital_print_price: dpPrice,
+    frame_type: state.frameType,
+    bg_color: state.bgColor,
+    accent_color: state.accentColor,
+    gradient_stops: state.gradientStops,
+    gradient_angle: state.gradientAngle,
+    gradient_style: state.gradientStyle,
+    text_elements: frameConfig.elements || [],
+    layout_config: frameConfig,
+    image_url: frameConfig.overlayUrl || '',
+    asset_id: state.overlayAssetId ?? null,
+    is_active: Boolean(state.isActive),
+  };
+}
+
+/**
+ * Menyusun payload untuk Edit / Update Frame Existing (PUT /api/v1/admin/templates/:id)
+ * Menjamin ID template backend dipertahankan dan metadata yang sudah ada tidak hilang.
+ */
+export function buildUpdateTemplatePayload(
+  existingTemplate: Template,
+  state: FrameEditorState
+): UpdateTemplatePayload {
+  const dPrice = state.digitalPrice !== undefined && state.digitalPrice !== ''
+    ? Number(state.digitalPrice)
+    : existingTemplate.digitalPrice;
+  const dpPrice = state.digitalPrintPrice !== undefined && state.digitalPrintPrice !== ''
+    ? Number(state.digitalPrintPrice)
+    : existingTemplate.digitalPrintPrice;
+
+  const frameConfig = buildFrameConfig(
+    state.preset,
+    state.category,
+    state.frameType,
+    state.bgColor,
+    state.accentColor,
+    state.gradientStops,
+    state.gradientAngle,
+    state.gradientStyle,
+    state.textElements,
+    state.bgImageUrl || existingTemplate.imageUrl || '',
+    state.overlayAssetId !== undefined ? state.overlayAssetId : (existingTemplate.assetId ?? null),
+    state.assetElements,
+    state.customSlots || existingTemplate.layoutConfig?.slots,
+    existingTemplate.layoutConfig
+  );
+
+  return {
+    name: state.name.trim(),
+    layout_id: state.preset.id,
+    slot_count: state.preset.slots,
+    price: dPrice,
+    digital_price: dPrice,
+    digital_print_price: dpPrice,
+    frame_type: state.frameType,
+    bg_color: state.bgColor,
+    accent_color: state.accentColor,
+    gradient_stops: state.gradientStops,
+    gradient_angle: state.gradientAngle,
+    gradient_style: state.gradientStyle,
+    text_elements: frameConfig.elements || [],
+    layout_config: frameConfig,
+    image_url: frameConfig.overlayUrl || '',
+    asset_id: state.overlayAssetId !== undefined ? state.overlayAssetId : (existingTemplate.assetId ?? null),
+    // PENTING: Pertahankan status keaktifan frame existing agar frame live tidak menghilang dari kiosk
+    is_active: existingTemplate.isActive,
   };
 }

@@ -247,3 +247,230 @@ export async function fetchTemplates(): Promise<Template[]> {
 
   return rawList.map(adaptBackendTemplateToDian);
 }
+
+// ============================================================================
+// MODUL 2 TAHAP 3B: KONTRAK PAYLOAD, BUILDER, VALIDATOR & SAFEGUARD SERVICE
+// ============================================================================
+
+export interface CreateTemplatePayload {
+  name: string;
+  layout_id: string;
+  slot_count: number;
+  price: number;
+  digital_price: number;
+  digital_print_price: number;
+  frame_type: 'color' | 'gradient' | 'png';
+  bg_color: string;
+  accent_color: string;
+  gradient_stops: GradientStop[];
+  gradient_angle: number;
+  gradient_style: 'linear' | 'radial';
+  text_elements: TextElement[];
+  layout_config: CanvasLayoutConfig;
+  image_url?: string;
+  asset_id?: string | number | null;
+  is_active: boolean;
+}
+
+export interface UpdateTemplatePayload {
+  name?: string;
+  layout_id?: string;
+  slot_count?: number;
+  price?: number;
+  digital_price?: number;
+  digital_print_price?: number;
+  frame_type?: 'color' | 'gradient' | 'png';
+  bg_color?: string;
+  accent_color?: string;
+  gradient_stops?: GradientStop[];
+  gradient_angle?: number;
+  gradient_style?: 'linear' | 'radial';
+  text_elements?: TextElement[];
+  layout_config?: CanvasLayoutConfig;
+  image_url?: string;
+  asset_id?: string | number | null;
+  is_active?: boolean;
+}
+
+export interface ValidationResult {
+  valid: boolean;
+  errors: string[];
+  warnings: string[];
+}
+
+export interface SimulationResult {
+  success: boolean;
+  simulated: true;
+  method: 'POST' | 'PUT';
+  endpoint: string;
+  templateId?: string | number;
+  payload: CreateTemplatePayload | UpdateTemplatePayload;
+  validation: ValidationResult;
+  timestamp: string;
+}
+
+/**
+ * Validasi payload template sebelum dikirim ke backend
+ */
+export function validateTemplatePayload(
+  payload: CreateTemplatePayload | UpdateTemplatePayload,
+  isEdit = false
+): ValidationResult {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+
+  // 1. Validasi Nama Frame
+  if (!payload.name || !String(payload.name).trim()) {
+    if (!isEdit) {
+      errors.push('Nama frame wajib diisi.');
+    }
+  } else if (String(payload.name).trim().length > 100) {
+    errors.push('Nama frame maksimal 100 karakter.');
+  }
+
+  // 2. Validasi Layout ID & Slot Count
+  if (!isEdit || payload.layout_id !== undefined) {
+    if (!payload.layout_id || !String(payload.layout_id).trim()) {
+      errors.push('Layout ID wajib ditentukan.');
+    }
+  }
+
+  if (payload.slot_count !== undefined) {
+    if (!Number.isInteger(payload.slot_count) || payload.slot_count < 1) {
+      errors.push('slot_count harus berupa bilangan bulat minimal 1.');
+    }
+  }
+
+  // 3. Validasi Harga Paket (Digital & Digital Print)
+  if (payload.digital_price !== undefined && payload.digital_price !== null) {
+    const dp = Number(payload.digital_price);
+    if (!Number.isSafeInteger(dp) || dp < 0) {
+      errors.push('digital_price harus berupa nominal bulat positif.');
+    } else if (dp === 0) {
+      warnings.push('digital_price bernilai Rp 0 (Gratis).');
+    }
+  }
+
+  if (payload.digital_print_price !== undefined && payload.digital_print_price !== null) {
+    const dpp = Number(payload.digital_print_price);
+    if (!Number.isSafeInteger(dpp) || dpp < 0) {
+      errors.push('digital_print_price harus berupa nominal bulat positif.');
+    } else if (dpp === 0) {
+      warnings.push('digital_print_price bernilai Rp 0 (Gratis).');
+    }
+  }
+
+  // 4. Validasi layout_config
+  if (payload.layout_config) {
+    const cfg = payload.layout_config;
+
+    // Batasan ukuran JSON backend: 256KB
+    const jsonStr = JSON.stringify(cfg);
+    if (jsonStr.length > 256 * 1024) {
+      errors.push('Ukuran konfigurasi kanvas melebihi batas 256KB backend.');
+    }
+
+    // Validasi dimensi kanvas
+    if (cfg.width !== undefined && cfg.width <= 0) {
+      errors.push('Lebar kanvas (width) harus lebih besar dari 0.');
+    }
+    if (cfg.height !== undefined && cfg.height <= 0) {
+      errors.push('Tinggi kanvas (height) harus lebih besar dari 0.');
+    }
+
+    // Validasi slots geometry
+    if (Array.isArray(cfg.slots)) {
+      cfg.slots.forEach((slot, idx) => {
+        if (slot.width <= 0 || slot.height <= 0) {
+          errors.push(`Slot #${idx + 1} memiliki dimensi tidak valid (w: ${slot.width}, h: ${slot.height}).`);
+        }
+      });
+    }
+
+    // Validasi managed URLs (backend tidak menerima domain eksternal sembarangan)
+    if (cfg.overlayUrl && typeof cfg.overlayUrl === 'string' && cfg.overlayUrl.trim()) {
+      if (/^https?:\/\//i.test(cfg.overlayUrl) && !cfg.overlayUrl.includes('/uploads/')) {
+        warnings.push('overlayUrl menggunakan URL penuh; pastikan berkas tersimpan di penyimpanan resmi backend.');
+      }
+    }
+  }
+
+  return {
+    valid: errors.length === 0,
+    errors,
+    warnings,
+  };
+}
+
+/**
+ * Flag Safeguard Mutasi Backend:
+ * Menjamin TIDAK ADA request POST/PUT/DELETE yang dieksekusi ke backend produksi
+ * pada Tahap 3B sampai persetujuan izin tertulis diberikan.
+ */
+export const ENABLE_BACKEND_MUTATIONS = false;
+
+/**
+ * Service API: Buat frame template baru (POST /api/v1/admin/templates/generate)
+ * Menggunakan mode simulasi secara default demi perlindungan data backend produksi.
+ */
+export async function createTemplate(
+  payload: CreateTemplatePayload,
+  options?: { simulate?: boolean }
+): Promise<SimulationResult | { success: boolean; data: unknown }> {
+  const shouldSimulate = options?.simulate ?? !ENABLE_BACKEND_MUTATIONS;
+  const validation = validateTemplatePayload(payload, false);
+
+  if (shouldSimulate) {
+    // Mode Simulasi: Menahan HTTP request mutasi dan mengembalikan bukti eksekusi
+    return {
+      success: validation.valid,
+      simulated: true,
+      method: 'POST',
+      endpoint: '/api/v1/admin/templates/generate',
+      payload,
+      validation,
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  if (!validation.valid) {
+    throw new Error(`Validasi payload gagal: ${validation.errors.join('; ')}`);
+  }
+
+  const response = await api.post('/admin/templates/generate', payload);
+  return response.data;
+}
+
+/**
+ * Service API: Perbarui frame template yang sudah ada (PUT /api/v1/admin/templates/:id)
+ * Menjamin template ID backend dipertahankan dan TIDAK menggunakan pola DELETE + POST.
+ */
+export async function updateTemplate(
+  id: string | number,
+  payload: UpdateTemplatePayload,
+  options?: { simulate?: boolean }
+): Promise<SimulationResult | { success: boolean; data: unknown }> {
+  const shouldSimulate = options?.simulate ?? !ENABLE_BACKEND_MUTATIONS;
+  const validation = validateTemplatePayload(payload, true);
+
+  if (shouldSimulate) {
+    // Mode Simulasi: Menahan HTTP request mutasi dan mengembalikan bukti eksekusi
+    return {
+      success: validation.valid,
+      simulated: true,
+      method: 'PUT',
+      endpoint: `/api/v1/admin/templates/${id}`,
+      templateId: id,
+      payload,
+      validation,
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  if (!validation.valid) {
+    throw new Error(`Validasi payload gagal: ${validation.errors.join('; ')}`);
+  }
+
+  const response = await api.put(`/admin/templates/${id}`, payload);
+  return response.data;
+}
