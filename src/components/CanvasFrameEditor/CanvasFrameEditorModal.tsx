@@ -49,7 +49,7 @@ import {
   SimulationResult
 } from '../../lib/templates';
 import { useTemplate } from '../../TemplateContext';
-import { ReusableAsset, fetchReusableAssets, uploadReusableAsset, resolveAssetUrl } from '../../lib/assets';
+import { ReusableAsset, fetchCombinedAssets, uploadReusableAsset, resolveAssetUrl } from '../../lib/assets';
 import { CanvasPreview } from './CanvasPreview';
 import { GradientStopEditor } from './GradientStopEditor';
 import { cn } from '../../lib/utils';
@@ -191,17 +191,13 @@ export const CanvasFrameEditorModal: React.FC<CanvasFrameEditorModalProps> = ({
     setSelectedAssetId(null);
   }, [isOpen, editingTemplate, passedPreset]);
 
-  // Load Reusable Assets for Stickers & Overlays
+  // Load Reusable Assets for Stickers & Overlays (backend + local storage)
   useEffect(() => {
     if (!isOpen) return;
     setLoadingAssets(true);
-    Promise.all([
-      fetchReusableAssets('sticker'),
-      fetchReusableAssets('logo'),
-      fetchReusableAssets('overlay'),
-    ])
-      .then(([stickers, logos, overlays]) => {
-        setBackendAssets([...overlays, ...stickers, ...logos]);
+    fetchCombinedAssets('all')
+      .then(assets => {
+        setBackendAssets(assets);
       })
       .catch(err => {
         console.warn('Could not load backend assets:', err);

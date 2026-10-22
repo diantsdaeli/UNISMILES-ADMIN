@@ -312,12 +312,17 @@ export interface SimulationResult {
   timestamp: string;
 }
 
+export interface TemplateValidationOptions {
+  disallowSimulatedAssets?: boolean;
+}
+
 /**
  * Validasi payload template sebelum dikirim ke backend
  */
 export function validateTemplatePayload(
   payload: CreateTemplatePayload | UpdateTemplatePayload,
-  isEdit = false
+  isEdit = false,
+  options?: TemplateValidationOptions
 ): ValidationResult {
   const errors: string[] = [];
   const warnings: string[] = [];
@@ -391,6 +396,25 @@ export function validateTemplatePayload(
     if (cfg.overlayUrl && typeof cfg.overlayUrl === 'string' && cfg.overlayUrl.trim()) {
       if (/^https?:\/\//i.test(cfg.overlayUrl) && !cfg.overlayUrl.includes('/uploads/')) {
         warnings.push('overlayUrl menggunakan URL penuh; pastikan berkas tersimpan di penyimpanan resmi backend.');
+      }
+    }
+
+    // Validasi deteksi aset simulasi (sim-*) untuk perlindungan payload backend sungguhan
+    const hasSimulatedAsset = (
+      (typeof cfg.overlayUrl === 'string' && cfg.overlayUrl.includes('sim-')) ||
+      (typeof payload.image_url === 'string' && payload.image_url.includes('sim-')) ||
+      (Array.isArray(cfg.elements) && cfg.elements.some((el: any) =>
+        String(el.id || '').includes('sim-') ||
+        String(el.url || '').includes('sim-') ||
+        String(el.content || '').includes('sim-')
+      ))
+    );
+
+    if (hasSimulatedAsset) {
+      if (options?.disallowSimulatedAssets || ENABLE_BACKEND_MUTATIONS) {
+        errors.push('Payload frame sungguhan tidak boleh menggunakan aset simulasi (sim-*). Unggah aset resmi ke server terlebih dahulu.');
+      } else {
+        warnings.push('Template memuat aset simulasi (sim-*); aset ini belum tersimpan secara permanen di backend.');
       }
     }
   }

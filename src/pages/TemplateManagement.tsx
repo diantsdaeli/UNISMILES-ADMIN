@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   Plus, 
   Search, 
@@ -8,7 +8,8 @@ import {
   Loader2,
   Layers,
   Upload,
-  Lock
+  Lock,
+  Trash2
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useTemplate, Template } from '../TemplateContext';
@@ -25,7 +26,14 @@ import {
   LayoutTabIcon, 
   FrameCard 
 } from '../components/CanvasFrameEditor';
-import { fetchReusableAssets, ReusableAsset, resolveAssetUrl } from '../lib/assets';
+import { 
+  fetchCombinedAssets, 
+  uploadReusableAsset, 
+  deleteReusableAsset, 
+  ReusableAsset, 
+  resolveAssetUrl,
+  validateAssetUpload
+} from '../lib/assets';
 
 export const TemplateManagement: React.FC = () => {
   const navigate = useNavigate();
@@ -57,8 +65,10 @@ export const TemplateManagement: React.FC = () => {
   // Sticker Library Assets State
   const [stickersList, setStickersList] = useState<ReusableAsset[]>([]);
   const [stickersLoading, setStickersLoading] = useState<boolean>(false);
+  const [isAssetSubmitting, setIsAssetSubmitting] = useState<boolean>(false);
   const [stickerFilterType, setStickerFilterType] = useState<string>('all');
   const [stickerSearch, setStickerSearch] = useState<string>('');
+  const stickerFileInputRef = useRef<HTMLInputElement | null>(null);
 
   // Templates for Active Layout
   const templatesForLayout = useMemo(
@@ -93,17 +103,13 @@ export const TemplateManagement: React.FC = () => {
     }
   }, [activeLayoutId, templatesForLayout]);
 
-  // Load Sticker Library Assets when Tab Stickers active
+  // Load Sticker Library Assets (backend + local storage preserved)
   useEffect(() => {
     if (activeMainTab !== 'stickers') return;
     setStickersLoading(true);
-    Promise.all([
-      fetchReusableAssets('sticker'),
-      fetchReusableAssets('logo'),
-      fetchReusableAssets('overlay'),
-    ])
-      .then(([stickers, logos, overlays]) => {
-        setStickersList([...stickers, ...logos, ...overlays]);
+    fetchCombinedAssets('all')
+      .then(assets => {
+        setStickersList(assets);
       })
       .catch(err => {
         console.warn('Failed loading assets for sticker library:', err);
@@ -112,6 +118,61 @@ export const TemplateManagement: React.FC = () => {
         setStickersLoading(false);
       });
   }, [activeMainTab]);
+
+  // Handler Upload Aset Stiker Baru dengan validasi & duplicate submit guard
+  const handleStickerFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (isAssetSubmitting) return;
+
+    const validation = validateAssetUpload(file, file.name, 'sticker');
+    if (!validation.valid) {
+      toast.error(validation.errors[0] || 'Validasi berkas gagal.');
+      e.target.value = '';
+      return;
+    }
+
+    setIsAssetSubmitting(true);
+    try {
+      const defaultName = file.name.replace(/\.[^.]+$/, '');
+      const newAsset = await uploadReusableAsset(file, defaultName, 'sticker');
+      setStickersList(prev => [newAsset, ...prev.filter(a => String(a.id) !== String(newAsset.id))]);
+      if (newAsset.simulated) {
+        toast.info(`Aset "${newAsset.name}" disimpan secara lokal (mode aman).`);
+      } else {
+        toast.success(`Aset "${newAsset.name}" berhasil diunggah.`);
+      }
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || err?.message || 'Gagal mengunggah aset.');
+    } finally {
+      setIsAssetSubmitting(false);
+      e.target.value = '';
+    }
+  };
+
+  // Handler Hapus Aset dengan Konfirmasi & Konsistensi State
+  const handleDeleteAsset = async (asset: ReusableAsset) => {
+    if (isAssetSubmitting) return;
+
+    const confirmed = window.confirm(`Apakah Anda yakin ingin menghapus aset "${asset.name}"?`);
+    if (!confirmed) return;
+
+    setIsAssetSubmitting(true);
+    try {
+      const res = await deleteReusableAsset(asset.id);
+      setStickersList(prev => prev.filter(a => String(a.id) !== String(asset.id)));
+      if (res.simulated) {
+        toast.info(res.message || `Aset "${asset.name}" dihapus dari penyimpanan lokal saja.`);
+      } else {
+        toast.success(res.message || `Aset "${asset.name}" berhasil dihapus.`);
+      }
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || err?.message || 'Gagal menghapus aset.');
+    } finally {
+      setIsAssetSubmitting(false);
+    }
+  };
 
   // Filtered Templates based on layout + secondary category + search
   const filteredTemplates = useMemo(() => {
@@ -508,18 +569,30 @@ export const TemplateManagement: React.FC = () => {
 
               {/* Upload Sticker Button (Safeguarded) */}
               <div className="relative group self-start sm:self-auto">
+                <input
+                  type="file"
+                  ref={stickerFileInputRef}
+                  onChange={handleStickerFileSelected}
+                  accept="image/png,image/jpeg,image/webp"
+                  className="hidden"
+                  data-testid="sticker-file-input"
+                />
                 <button
                   type="button"
-                  disabled
-                  className="flex items-center gap-2 px-4 py-2 bg-emerald-500/20 border border-emerald-500/30 text-emerald-400/50 rounded-xl text-[11px] font-black uppercase tracking-wider cursor-not-allowed"
+                  disabled={isAssetSubmitting}
+                  onClick={() => stickerFileInputRef.current?.click()}
+                  className={cn(
+                    "flex items-center gap-2 px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl text-[11px] font-black uppercase tracking-wider transition-all shadow-md shadow-emerald-500/20 cursor-pointer",
+                    isAssetSubmitting && "opacity-50 cursor-not-allowed"
+                  )}
                 >
-                  <Lock className="w-3.5 h-3.5" />
+                  {isAssetSubmitting ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Upload className="w-3.5 h-3.5" />
+                  )}
                   Upload Stiker Baru
                 </button>
-                <div className="absolute right-0 top-full mt-2 w-64 p-3 bg-[#1E293B] border border-emerald-500/30 rounded-xl shadow-2xl text-[9px] text-emerald-200 hidden group-hover:block z-50 pointer-events-none">
-                  <p className="font-bold text-emerald-400 mb-1">Mode Read-Only</p>
-                  Upload aset massal pada halaman utama dinonaktifkan untuk melindungi server backend produksi.
-                </div>
               </div>
             </div>
 
@@ -578,11 +651,25 @@ export const TemplateManagement: React.FC = () => {
                   .map(asset => (
                     <div
                       key={asset.id}
-                      className="p-3 bg-black/40 border border-white/5 hover:border-emerald-500/40 rounded-2xl flex flex-col items-center gap-2 transition-all group"
+                      className="p-3 bg-black/40 border border-white/5 hover:border-emerald-500/40 rounded-2xl flex flex-col items-center gap-2 transition-all group relative"
                     >
+                      {/* Delete Asset Button */}
+                      <button
+                        type="button"
+                        title={`Hapus ${asset.name}`}
+                        disabled={isAssetSubmitting}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeleteAsset(asset);
+                        }}
+                        className="absolute top-2 right-2 p-1.5 rounded-lg bg-black/60 hover:bg-rose-500/20 text-muted hover:text-rose-400 border border-white/10 hover:border-rose-500/30 transition-all opacity-0 group-hover:opacity-100 cursor-pointer z-10"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+
                       <div className="w-full h-28 rounded-xl bg-black/60 border border-white/5 flex items-center justify-center p-2 overflow-hidden">
                         <img
-                          src={resolveAssetUrl(asset.url)}
+                          src={asset.resolvedUrl || resolveAssetUrl(asset.url)}
                           alt={asset.name}
                           className="max-w-full max-h-full object-contain group-hover:scale-110 transition-transform duration-200"
                           onError={e => {
@@ -592,9 +679,16 @@ export const TemplateManagement: React.FC = () => {
                       </div>
                       <div className="w-full text-center">
                         <p className="text-[10px] font-bold text-foreground truncate">{asset.name}</p>
-                        <span className="text-[8px] font-black uppercase tracking-wider text-emerald-400/80 bg-emerald-500/10 px-2 py-0.5 rounded-full mt-1 inline-block">
-                          {asset.type}
-                        </span>
+                        <div className="flex items-center justify-center gap-1 mt-1">
+                          <span className="text-[8px] font-black uppercase tracking-wider text-emerald-400/80 bg-emerald-500/10 px-2 py-0.5 rounded-full inline-block">
+                            {asset.type}
+                          </span>
+                          {asset.isLocal && (
+                            <span className="text-[8px] font-black uppercase tracking-wider text-amber-400/80 bg-amber-500/10 px-1.5 py-0.5 rounded-full inline-block">
+                              Local
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </div>
                   ))}
