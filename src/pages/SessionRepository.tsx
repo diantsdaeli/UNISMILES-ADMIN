@@ -20,7 +20,9 @@ import {
   ChevronRight,
   Eye,
   Store,
-  Sparkles
+  Sparkles,
+  ShieldAlert,
+  Lock
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useSession } from '../SessionContext';
@@ -35,6 +37,11 @@ import {
   sendDigitalCopySimulation,
   isSafePhotoUrl
 } from '../lib/sessionService';
+import { 
+  fetchPaymentVerificationAttempts, 
+  PaymentVerificationAttempt 
+} from '../lib/paymentService';
+import api from '../lib/api';
 import { toast } from 'sonner';
 
 export const SessionRepository: React.FC = () => {
@@ -55,10 +62,28 @@ export const SessionRepository: React.FC = () => {
   const [previewPhoto, setPreviewPhoto] = useState<SessionPhoto | null>(null);
   const [resendEmail, setResendEmail] = useState('');
   const [sendingEmail, setSendingEmail] = useState(false);
+  const [verificationAttempts, setVerificationAttempts] = useState<PaymentVerificationAttempt[]>([]);
+  const [loadingAttempts, setLoadingAttempts] = useState(false);
 
   // Pagination States
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
+
+  // Load verification attempts when a session is selected
+  React.useEffect(() => {
+    if (selectedSession) {
+      setLoadingAttempts(true);
+      fetchPaymentVerificationAttempts(selectedSession.rawId || selectedSession.id)
+        .then(attempts => setVerificationAttempts(attempts))
+        .catch(err => {
+          console.error('[SessionRepository] Error loading attempts:', err);
+          setVerificationAttempts([]);
+        })
+        .finally(() => setLoadingAttempts(false));
+    } else {
+      setVerificationAttempts([]);
+    }
+  }, [selectedSession]);
 
   // Filter options derived from data & kiosks
   const templates = useMemo(() => {
@@ -777,27 +802,63 @@ export const SessionRepository: React.FC = () => {
               </div>
 
               {/* Data Grid Sesi */}
-              <div className="grid grid-cols-2 gap-4 bg-black/20 p-5 rounded-2xl border border-white/5 text-xs">
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3.5 bg-black/20 p-5 rounded-2xl border border-white/5 text-xs">
                 <div>
                   <span className="text-[9px] font-black text-muted uppercase tracking-widest block mb-0.5">Template Frame</span>
                   <span className="font-bold text-foreground">{selectedSession.template || 'Default'}</span>
                 </div>
                 <div>
-                  <span className="text-[9px] font-black text-muted uppercase tracking-widest block mb-0.5">Nilai Transaksi</span>
+                  <span className="text-[9px] font-black text-muted uppercase tracking-widest block mb-0.5">Nominal Transaksi</span>
                   <span className="font-bold text-foreground">Rp {(selectedSession.amount || 0).toLocaleString('id-ID')}</span>
                 </div>
                 <div>
-                  <span className="text-[9px] font-black text-muted uppercase tracking-widest block mb-0.5">Status Sesi</span>
-                  <span className={cn(
-                    "font-bold",
-                    selectedSession.status === 'Success' ? "text-emerald-400" : "text-amber-400"
-                  )}>
-                    {selectedSession.status}
-                  </span>
+                  <span className="text-[9px] font-black text-muted uppercase tracking-widest block mb-0.5">Status Pembayaran</span>
+                  {(() => {
+                    const ps = selectedSession.payment_status ? selectedSession.payment_status.toLowerCase() : undefined;
+                    if (ps === 'paid' || ps === 'success') {
+                      return <span className="font-bold text-emerald-400">Paid (Terverifikasi)</span>;
+                    }
+                    if (ps === 'pending') {
+                      return <span className="font-bold text-amber-400">Pending (Menunggu Bukti Bayar)</span>;
+                    }
+                    if (ps === 'failed') {
+                      return <span className="font-bold text-red-400">Failed (Pembayaran Ditolak)</span>;
+                    }
+                    if (ps === 'expired') {
+                      return <span className="font-bold text-muted">Expired (Batas Waktu Habis)</span>;
+                    }
+                    if (ps) {
+                      return <span className="font-bold text-amber-400">{selectedSession.payment_status}</span>;
+                    }
+                    return (
+                      <span className="font-bold text-amber-400/90 text-[10px] leading-tight block">
+                        Belum Terverifikasi / Status Pembayaran Tidak Tersedia
+                      </span>
+                    );
+                  })()}
+                </div>
+                <div>
+                  <span className="text-[9px] font-black text-muted uppercase tracking-widest block mb-0.5">Metode Bayar</span>
+                  <span className="font-bold text-foreground">QRIS / Dynamic Proof</span>
+                </div>
+                <div>
+                  <span className="text-[9px] font-black text-muted uppercase tracking-widest block mb-0.5">Referensi Transaksi</span>
+                  {selectedSession.transaction_code || selectedSession.transaction_id ? (
+                    <span className="font-mono font-bold text-foreground">
+                      {selectedSession.transaction_code || selectedSession.transaction_id}
+                    </span>
+                  ) : (
+                    <div className="flex flex-col">
+                      <span className="font-mono text-muted text-xs">US-TRX-{selectedSession.rawId || selectedSession.id.replace(/^#/, '')}</span>
+                      <span className="text-[8px] font-black uppercase tracking-wider text-amber-400 mt-0.5">
+                        (Referensi Simulasi)
+                      </span>
+                    </div>
+                  )}
                 </div>
                 <div>
                   <span className="text-[9px] font-black text-muted uppercase tracking-widest block mb-0.5">Kiosk Asal</span>
-                  <span className="font-bold text-foreground block">{selectedSession.kiosk_name}</span>
+                  <span className="font-bold text-foreground block truncate">{selectedSession.kiosk_name}</span>
                   <span className="text-[9px] text-muted font-mono">{selectedSession.kiosk_id}</span>
                 </div>
               </div>
@@ -893,6 +954,106 @@ export const SessionRepository: React.FC = () => {
                 )}
               </div>
 
+              {/* Payment Verification Attempts Section (Read-Only) */}
+              <div className="pt-4 border-t border-white/5 space-y-3">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-[11px] font-black uppercase tracking-widest text-muted flex items-center gap-2">
+                    <ShieldAlert className="w-3.5 h-3.5 text-primary" /> Verifikasi Pembayaran (Read-Only)
+                  </h4>
+                  <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-full bg-white/5 text-muted border border-white/10">
+                    Fail-Closed Safe
+                  </span>
+                </div>
+
+                {loadingAttempts && (
+                  <p className="text-xs text-muted font-bold py-2">Memeriksa catatan verifikasi bukti bayar...</p>
+                )}
+
+                {!loadingAttempts && verificationAttempts.length > 0 && (
+                  <div className="space-y-4">
+                    {verificationAttempts.map((att) => (
+                      <div key={att.id} className="p-4 bg-black/30 rounded-2xl border border-white/5 space-y-3 text-xs">
+                        <div className="flex items-center justify-between">
+                          <span className="font-bold text-foreground">Percobaan #{att.attempt_number}</span>
+                          <span className={cn(
+                            "text-[10px] font-black px-2 py-0.5 rounded-full uppercase tracking-wider",
+                            att.decision === 'verified' ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" : "bg-red-500/10 text-red-400 border border-red-500/20"
+                          )}>
+                            {att.decision}
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2 text-[11px]">
+                          <div>Nominal Target: <span className="font-bold">Rp {att.expected_amount.toLocaleString('id-ID')}</span></div>
+                          <div>Nominal Terbaca: <span className="font-bold">{att.extracted_amount ? `Rp ${att.extracted_amount.toLocaleString('id-ID')}` : '-'}</span></div>
+                          <div>Provider: <span className="font-bold">{att.provider_detected || '-'}</span></div>
+                          <div>Skor OCR: <span className="font-bold">{att.ocr_confidence ? `${Math.round(att.ocr_confidence * 100)}%` : '-'}</span></div>
+                          {att.screen_type && (
+                            <div className="col-span-2 text-[10px] text-muted">
+                              Tipe Tangkapan: <span className="font-mono text-foreground uppercase">{att.screen_type}</span>
+                            </div>
+                          )}
+                        </div>
+                        {att.reason_codes && att.reason_codes.length > 0 && (
+                          <div className="text-[10px] text-red-400 bg-red-500/5 p-2 rounded-lg border border-red-500/10">
+                            Alasan Penolakan: <span className="font-mono">{att.reason_codes.join(', ')}</span>
+                          </div>
+                        )}
+
+                        {/* Evidence Screenshot Preview */}
+                        <div className="space-y-1.5 border-t border-white/5 pt-2">
+                          <span className="text-[9px] font-black uppercase tracking-widest text-muted block">Bukti Pembayaran</span>
+                          <ProtectedEvidenceImage attemptId={att.id} />
+                        </div>
+
+                        {/* Disabled Manual Override Simulation (Admin Nadin Parity) */}
+                        {att.decision !== 'verified' && (
+                          <div className="space-y-2 bg-[#10172A] p-3 rounded-xl border border-white/5 mt-2">
+                            <div className="flex items-center justify-between">
+                              <label className="text-[9px] font-black text-muted uppercase tracking-widest block">Manual Override</label>
+                              <span className="text-[8px] font-black uppercase px-2 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/20">
+                                Mode Simulasi
+                              </span>
+                            </div>
+                            <input 
+                              type="text" 
+                              disabled
+                              placeholder="Alasan override manual dikunci..." 
+                              value=""
+                              className="w-full bg-black/20 border border-white/5 rounded-lg px-3 py-1.5 text-xs font-bold text-muted cursor-not-allowed opacity-60"
+                            />
+                            <div className="flex gap-2 justify-end">
+                              <button 
+                                disabled
+                                className="px-3 py-1.5 bg-red-500/10 text-red-400 border border-red-500/20 rounded-lg text-[9px] font-black uppercase tracking-wider cursor-not-allowed opacity-50"
+                                title="Mode Simulasi: Mutasi status pembayaran diblokir untuk keamanan produksi"
+                              >
+                                Reject Payment
+                              </button>
+                              <button 
+                                disabled
+                                className="px-3 py-1.5 bg-primary/40 text-[#10172A] rounded-lg text-[9px] font-black uppercase tracking-wider cursor-not-allowed opacity-50"
+                                title="Mode Simulasi: Mutasi status pembayaran diblokir untuk keamanan produksi"
+                              >
+                                Approve Payment
+                              </button>
+                            </div>
+                            <p className="text-[9px] text-muted italic">
+                              Mutasi status pembayaran dikunci (ENABLE_BACKEND_MUTATIONS = false).
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {!loadingAttempts && verificationAttempts.length === 0 && (
+                  <div className="p-3.5 rounded-xl bg-black/15 border border-dashed border-white/10 text-xs text-muted font-medium text-center">
+                    No payment verification logs for this session.
+                  </div>
+                )}
+              </div>
+
               {/* Action Operations */}
               <div className="pt-4 border-t border-white/5 space-y-4">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -983,3 +1144,43 @@ export const SessionRepository: React.FC = () => {
     </div>
   );
 };
+
+const ProtectedEvidenceImage: React.FC<{ attemptId: string }> = ({ attemptId }) => {
+  const [src, setSrc] = React.useState<string>('');
+  const [loading, setLoading] = React.useState(true);
+
+  React.useEffect(() => {
+    let active = true;
+    let objectUrl = '';
+    api.get(`/admin/payment-verifications/attempts/${attemptId}/evidence`, { responseType: 'blob' })
+      .then(res => {
+        if (active && res.data) {
+          objectUrl = URL.createObjectURL(res.data);
+          setSrc(objectUrl);
+        }
+      })
+      .catch(() => {
+        if (active) setSrc('');
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+
+    return () => {
+      active = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [attemptId]);
+
+  if (loading) return <div className="h-28 bg-black/20 rounded-xl flex items-center justify-center text-xs text-muted">Memuat bukti transfer...</div>;
+  if (!src) return <div className="p-3 bg-black/20 rounded-xl text-center text-xs text-muted border border-white/5">Bukti transfer tersimpan aman di direktori privat server.</div>;
+
+  return (
+    <img 
+      src={src} 
+      alt="Bukti Transfer" 
+      className="w-full h-auto rounded-xl border border-white/10 max-h-56 object-contain mx-auto bg-black/40" 
+    />
+  );
+};
+

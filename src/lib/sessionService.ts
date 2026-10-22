@@ -20,6 +20,9 @@ export interface SessionItem {
   detailedPhotos: SessionPhoto[]; // Objek foto yang ternormalisasi dengan metadata
   amount: number; // Nilai transaksi sesi (Rp)
   status: 'Success' | 'Failed (Paper Jam)' | 'Pending' | string;
+  payment_status?: 'paid' | 'pending' | 'failed' | 'expired' | string; // Status pembayaran dari gateway/backend
+  transaction_id?: string; // ID transaksi resmi jika ada di backend
+  transaction_code?: string; // Kode transaksi resmi jika ada di backend
   kiosk_id: string; // ID kiosk pemilik sesi
   kiosk_name: string; // Nama kiosk yang terbaca manusia
   user_id?: string | number; // ID pemilik kiosk (untuk isolasi Admin Mitra)
@@ -243,6 +246,16 @@ export const normalizeSession = (raw: any): SessionItem => {
   const user_id = raw?.user_id ?? raw?.userId;
   const isSimulated = Boolean(raw?.isSimulated);
 
+  // Extract explicit payment status and transaction metadata
+  const rawPaymentStatus = raw?.payment_status ?? raw?.paymentStatus ?? raw?.transaction?.status;
+  const payment_status = rawPaymentStatus ? String(rawPaymentStatus).toLowerCase() : undefined;
+  
+  const rawTxId = raw?.transaction_id ?? raw?.transactionId ?? raw?.transaction?.id;
+  const transaction_id = rawTxId ? String(rawTxId) : undefined;
+  
+  const rawTxCode = raw?.transaction_code ?? raw?.transactionCode ?? raw?.transaction?.transaction_code;
+  const transaction_code = rawTxCode ? String(rawTxCode) : undefined;
+
   return {
     id,
     rawId,
@@ -252,6 +265,9 @@ export const normalizeSession = (raw: any): SessionItem => {
     detailedPhotos: allPhotos,
     amount,
     status,
+    payment_status,
+    transaction_id,
+    transaction_code,
     kiosk_id,
     kiosk_name,
     user_id,
@@ -276,6 +292,9 @@ export const SEED_SESSIONS: SessionItem[] = [
     detailedPhotos: [],
     amount: 35000,
     status: 'Success',
+    payment_status: 'paid',
+    transaction_code: 'US-TRX-20260330-001',
+    transaction_id: 'TRX-8821',
     kiosk_id: 'KSK-0001',
     kiosk_name: 'Kiosk Central Park Mall',
     user_id: 1,
@@ -293,6 +312,7 @@ export const SEED_SESSIONS: SessionItem[] = [
     detailedPhotos: [],
     amount: 25000,
     status: 'Success',
+    // Deliberately no payment_status to verify handling of unverified payment status
     kiosk_id: 'KSK-0002',
     kiosk_name: 'Kiosk Grand Indonesia',
     user_id: 2,
@@ -309,6 +329,7 @@ export const SEED_SESSIONS: SessionItem[] = [
     detailedPhotos: [],
     amount: 35000,
     status: 'Failed (Paper Jam)',
+    payment_status: 'failed',
     kiosk_id: 'KSK-0001',
     kiosk_name: 'Kiosk Central Park Mall',
     user_id: 1,
@@ -326,6 +347,9 @@ export const SEED_SESSIONS: SessionItem[] = [
     detailedPhotos: [],
     amount: 35000,
     status: 'Success',
+    payment_status: 'paid',
+    transaction_code: 'US-TRX-20260330-002',
+    transaction_id: 'TRX-8824',
     kiosk_id: 'KSK-0003',
     kiosk_name: 'Kiosk Senayan City',
     user_id: 1,
@@ -342,6 +366,7 @@ export const SEED_SESSIONS: SessionItem[] = [
     detailedPhotos: [],
     amount: 25000,
     status: 'Pending',
+    payment_status: 'pending',
     kiosk_id: 'KSK-0002',
     kiosk_name: 'Kiosk Grand Indonesia',
     user_id: 2,
