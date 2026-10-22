@@ -35,7 +35,8 @@ import {
   AlertCircle,
   X,
   Play,
-  Monitor
+  Monitor,
+  Wrench
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../lib/utils';
@@ -395,6 +396,24 @@ export const KioskConfigPage: React.FC<KioskConfigPageProps> = ({ kiosk, onBack,
             </button>
           </div>
         </div>
+      </div>
+
+      {/* Simulation Safeguard Banner */}
+      <div className="p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl flex items-center justify-between gap-4 text-xs">
+        <div className="flex items-center gap-3 text-emerald-300">
+          <ShieldCheck className="w-5 h-5 text-emerald-400 shrink-0" />
+          <div>
+            <span className="font-black uppercase tracking-wider text-[10px] text-emerald-400 block">
+              Status Konfigurasi: Tersimpan di Draf Lokal (Simulasi)
+            </span>
+            <span className="text-[11px] text-emerald-200/80">
+              Perubahan parameter 8 tab tersimpan di memori perangkat operator. Mutasi server produksi ditahan fail-closed.
+            </span>
+          </div>
+        </div>
+        <span className="px-3 py-1 bg-emerald-500/20 text-emerald-300 rounded-full text-[9px] font-black uppercase tracking-widest shrink-0 border border-emerald-500/30">
+          Fail-Closed Active
+        </span>
       </div>
 
       {/* Tab Navigation */}
@@ -1158,6 +1177,33 @@ export const KioskConfigPage: React.FC<KioskConfigPageProps> = ({ kiosk, onBack,
                         onChange={(e) => handleConfigChange({ autoRestart: e.target.value })}
                         className="w-full bg-black/20 border border-white/5 rounded-2xl px-6 py-4 outline-none focus:border-primary/40 font-black text-sm uppercase text-foreground appearance-none"
                       />
+                    </div>
+
+                    {/* Maintenance Mode Control */}
+                    <div className="p-6 bg-black/20 rounded-2xl border border-white/5 space-y-3">
+                      <div className="flex justify-between items-center">
+                        <div>
+                          <label className="text-[10px] font-black text-foreground uppercase tracking-widest flex items-center gap-2">
+                            <Wrench className="w-4 h-4 text-amber-400" /> Maintenance Mode (Mode Perawatan)
+                          </label>
+                          <p className="text-[10px] text-muted font-medium mt-1">
+                            Saat aktif, layar kiosk menampilkan peringatan pemeliharaan dan menolak sesi foto baru.
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleConfigChange({ maintenanceMode: !Boolean(activeConfig.maintenanceMode) })}
+                          className={cn(
+                            "w-14 h-7 rounded-full transition-colors relative cursor-pointer shrink-0",
+                            activeConfig.maintenanceMode ? "bg-amber-500" : "bg-white/10"
+                          )}
+                        >
+                          <div className={cn(
+                            "w-5 h-5 rounded-full bg-white transition-transform absolute top-1",
+                            activeConfig.maintenanceMode ? "left-8" : "left-1"
+                          )} />
+                        </button>
+                      </div>
                     </div>
 
                     <div className="p-8 bg-black/20 rounded-[2.5rem] border border-white/5 space-y-8">
