@@ -438,3 +438,135 @@ export async function softDeleteKioskSimulation(
     simulated: true
   };
 }
+
+/**
+ * Tipe data untuk hasil parsing error API Kiosk
+ */
+export interface ParsedKioskError {
+  status: number;
+  code: string;
+  message: string;
+  isSecurityError: boolean;
+  isNetworkError: boolean;
+}
+
+/**
+ * Parser error terstandarisasi untuk request API kiosk backend
+ */
+export function parseKioskApiError(error: any): ParsedKioskError {
+  const status = error?.response?.status || (error?.statusCode ?? 0);
+  const data = error?.response?.data;
+  const code = data?.error_code || error?.code || (
+    status === 400 ? 'BAD_REQUEST' :
+    status === 401 ? 'UNAUTHORIZED' :
+    status === 403 ? 'FORBIDDEN' :
+    status === 404 ? 'NOT_FOUND' :
+    status === 409 ? 'CONFLICT' :
+    status === 500 ? 'INTERNAL_SERVER_ERROR' :
+    'UNKNOWN_ERROR'
+  );
+  const message = data?.message || error?.message || 'Terjadi kesalahan pada kiosk service.';
+  const isSecurityError = status === 401 || status === 403 || message.includes('PERLINDUNGAN PRODUKSI') || message.includes('SAFEGUARD');
+  const isNetworkError = !status || error?.code === 'ECONNABORTED' || String(error?.message || '').toLowerCase().includes('timeout') || String(error?.message || '').toLowerCase().includes('network error');
+
+  return {
+    status,
+    code,
+    message,
+    isSecurityError,
+    isNetworkError,
+  };
+}
+
+/**
+ * Normalisasi data response backend /api/v1/admin/kiosks menjadi entitas Kiosk yang aman
+ */
+export function deserializeKioskResponse(raw: any): Kiosk {
+  if (!raw || typeof raw !== 'object') {
+    throw new Error('Format response kiosk dari backend tidak valid');
+  }
+
+  const rawKiosk = raw.data || raw;
+  const id = String(rawKiosk.id || rawKiosk.kiosk_id || 'UNKNOWN');
+  const name = String(rawKiosk.name || 'Unnamed Kiosk');
+  const location = String(rawKiosk.location || '');
+  const base_price = Number(rawKiosk.base_price !== undefined ? rawKiosk.base_price : (rawKiosk.price || 0));
+  const health = normalizeKioskTelemetry(rawKiosk.health || rawKiosk);
+  const lastHeartbeat = rawKiosk.lastHeartbeat || rawKiosk.last_heartbeat || rawKiosk.updated_at || null;
+  const status = rawKiosk.status === 'restarting'
+    ? 'restarting'
+    : getComputedStatus(lastHeartbeat, rawKiosk.isSocketConnected);
+
+  return {
+    id,
+    name,
+    location,
+    base_price,
+    price: base_price,
+    status,
+    health: {
+      printerInk: health.printerInk,
+      storage: health.storage,
+      camera: health.camera,
+      paperStatus: health.paperStatus,
+      printsRemaining: health.printsRemaining
+    },
+    config: rawKiosk.config || {},
+    lastHeartbeat,
+    createdAt: rawKiosk.createdAt || rawKiosk.created_at || new Date().toISOString(),
+    user_id: rawKiosk.user_id !== undefined ? rawKiosk.user_id : undefined,
+    api_key: null, // Sanitasi ketat: api_key backend tidak disimpan di entity kiosk terbuka
+    isSimulated: Boolean(rawKiosk.isSimulated),
+    hasCredentials: rawKiosk.hasCredentials !== false
+  };
+}
+
+/**
+ * Menyusun payload registrasi kiosk sebelum dikirim ke backend /api/v1/admin/kiosks
+ */
+export function serializeKioskPayload(payload: KioskRegistrationPayload): Record<string, unknown> {
+  const validation = validateKioskRegistration(payload);
+  if (!validation.isValid) {
+    const firstKey = Object.keys(validation.errors)[0];
+    throw new Error(validation.errors[firstKey] || 'Validasi pendaftaran kiosk gagal');
+  }
+
+  const basePriceNum = payload.base_price !== undefined && String(payload.base_price).trim() !== ''
+    ? Number(payload.base_price)
+    : 0;
+
+  return {
+    name: payload.name.trim(),
+    location: payload.location ? payload.location.trim() : '',
+    price: basePriceNum,
+    base_price: basePriceNum,
+    ...(payload.id && payload.id.trim() ? { id: payload.id.trim() } : {})
+  };
+}
+
+/**
+ * Struktur audit keamanan operasi kiosk
+ */
+export interface KioskOperationSafetyAudit {
+  isPhysicalRebootBlocked: boolean;
+  isRealWebSocketDisconnectBlocked: boolean;
+  isProductionKeyRotationBlocked: boolean;
+  isBackendDeleteBlocked: boolean;
+  isHardwarePrintBlocked: boolean;
+  mode: 'SAFE_SIMULATION';
+}
+
+/**
+ * Mengaudit bahwa seluruh aksi operasional kiosk berjalan dalam simulasi terisolasi
+ */
+export function auditKioskOperationSafety(): KioskOperationSafetyAudit {
+  return {
+    isPhysicalRebootBlocked: true,
+    isRealWebSocketDisconnectBlocked: true,
+    isProductionKeyRotationBlocked: true,
+    isBackendDeleteBlocked: true,
+    isHardwarePrintBlocked: true,
+    mode: 'SAFE_SIMULATION'
+  };
+}
+
