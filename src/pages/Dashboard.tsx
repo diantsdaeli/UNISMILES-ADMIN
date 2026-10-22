@@ -93,31 +93,38 @@ export const Dashboard: React.FC<DashboardProps> = () => {
     );
   }
 
+  const formatGrowth = (val: unknown) => {
+    if (val === null || val === undefined) return '0%';
+    const num = typeof val === 'number' && Number.isFinite(val) ? val : Number(val);
+    if (!Number.isFinite(num) || num === 0) return '0%';
+    return `${num > 0 ? '+' : ''}${num.toFixed(1)}%`;
+  };
+
   const statsList = [
     { 
       label: 'Total Sessions', 
-      value: data.stats.totalSessions.value.toLocaleString(), 
+      value: (Number(data.stats?.totalSessions?.value) || 0).toLocaleString(), 
       icon: Activity, 
-      change: `${data.stats.totalSessions.growth >= 0 ? '+' : ''}${data.stats.totalSessions.growth}%`, 
-      trend: data.stats.totalSessions.trend 
+      change: formatGrowth(data.stats?.totalSessions?.growth), 
+      trend: data.stats?.totalSessions?.trend || 'neutral' 
     },
     { 
       label: 'Photos Printed', 
-      value: data.stats.photosPrinted.value.toLocaleString(), 
+      value: (Number(data.stats?.photosPrinted?.value) || 0).toLocaleString(), 
       icon: Printer, 
-      change: `${data.stats.photosPrinted.growth >= 0 ? '+' : ''}${data.stats.photosPrinted.growth}%`, 
-      trend: data.stats.photosPrinted.trend 
+      change: formatGrowth(data.stats?.photosPrinted?.growth), 
+      trend: data.stats?.photosPrinted?.trend || 'neutral' 
     },
     { 
       label: 'Revenue Today', 
-      value: `Rp ${data.stats.revenueToday.value.toLocaleString('id-ID')}`, 
+      value: `Rp ${(Number(data.stats?.revenueToday?.value) || 0).toLocaleString('id-ID')}`, 
       icon: DollarSign, 
-      change: `${data.stats.revenue.growth >= 0 ? '+' : ''}${data.stats.revenue.growth}%`, 
-      trend: data.stats.revenue.trend 
+      change: formatGrowth(data.stats?.revenue?.growth), 
+      trend: data.stats?.revenue?.trend || 'neutral' 
     },
     { 
       label: 'Active Kiosks', 
-      value: `${data.activeKiosks.online}/${data.activeKiosks.total}`, 
+      value: `${data.activeKiosks?.online ?? 0}/${data.activeKiosks?.total ?? 0}`, 
       icon: Monitor, 
       change: 'Stable', 
       trend: 'neutral' 

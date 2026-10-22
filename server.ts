@@ -926,23 +926,25 @@ async function startServer() {
       `, [todayStartStr, nowStr]);
 
       const currentMetrics = {
-        totalSessions: currentSessionsAndRevenue[0].totalSessions,
-        totalRevenue: currentSessionsAndRevenue[0].totalRevenue,
-        photosPrinted: currentPhotos[0].photosPrinted
+        totalSessions: Number(currentSessionsAndRevenue[0]?.totalSessions) || 0,
+        totalRevenue: Number(currentSessionsAndRevenue[0]?.totalRevenue) || 0,
+        photosPrinted: Number(currentPhotos[0]?.photosPrinted) || 0
       };
 
       const prevMetrics = {
-        totalSessions: prevSessionsAndRevenue[0].totalSessions,
-        totalRevenue: prevSessionsAndRevenue[0].totalRevenue,
-        photosPrinted: prevPhotos[0].photosPrinted
+        totalSessions: Number(prevSessionsAndRevenue[0]?.totalSessions) || 0,
+        totalRevenue: Number(prevSessionsAndRevenue[0]?.totalRevenue) || 0,
+        photosPrinted: Number(prevPhotos[0]?.photosPrinted) || 0
       };
 
-      const revenueToday = todayRevenueRows[0].total;
+      const revenueToday = Number(todayRevenueRows[0]?.total) || 0;
 
-      const calcGrowth = (curr: number, prev: number) => {
-        if (prev === 0) return curr > 0 ? 100 : 0;
-        const growthVal = ((curr - prev) / prev) * 100;
-        return parseFloat(growthVal.toFixed(1));
+      const calcGrowth = (curr: any, prev: any) => {
+        const c = Number(curr) || 0;
+        const p = Number(prev) || 0;
+        if (p === 0) return c > 0 ? 100 : 0;
+        const growthVal = ((c - p) / p) * 100;
+        return Number.isFinite(growthVal) ? parseFloat(growthVal.toFixed(1)) : 0;
       };
 
       const stats = {

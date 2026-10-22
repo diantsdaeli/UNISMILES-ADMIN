@@ -28,9 +28,17 @@ export const Sidebar: React.FC<SidebarProps> = ({ role }) => {
   const [collapsed, setCollapsed] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
-  const { logout } = useAuth();
+  const { user, logout, isSuperAdmin: authIsSuperAdmin } = useAuth();
 
-  const isSuperAdmin = role === 'Super Admin' || role === 'admin';
+  const isSuperAdmin = authIsSuperAdmin || role === 'Super Admin' || role === 'admin';
+  const displayName = user?.displayName || user?.full_name || 'Admin';
+  const roleLabel = isSuperAdmin ? 'Super Admin' : (user?.partner_name ? `Mitra: ${user.partner_name}` : 'Admin Mitra');
+  const initials = displayName
+    .split(' ')
+    .filter(Boolean)
+    .slice(0, 2)
+    .map(w => w[0].toUpperCase())
+    .join('') || (isSuperAdmin ? 'SA' : 'AM');
 
   const menuItems = [
     { id: 'dashboard', path: '/dashboard', icon: LayoutDashboard, label: 'Dashboard', superAdminOnly: false },
@@ -110,13 +118,15 @@ export const Sidebar: React.FC<SidebarProps> = ({ role }) => {
         <div className="px-6 py-4 mx-3 mb-2 bg-black/20 rounded-2xl border border-white/5 flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-[#0F172A] border border-white/10 flex items-center justify-center overflow-hidden">
              <div className="w-full h-full bg-emerald-500/20 flex items-center justify-center text-emerald-400 font-black text-xs">
-               SA
+               {initials}
              </div>
           </div>
           <div className="flex-1 overflow-hidden">
-             <p className="text-[10px] font-black text-foreground uppercase tracking-tight truncate">Studio Admin</p>
-             <p className="text-[8px] font-black text-emerald-400 uppercase tracking-widest truncate">
-               {role === 'admin' ? 'Super Admin' : 'Admin Mitra'}
+             <p className="text-[10px] font-black text-foreground uppercase tracking-tight truncate" title={displayName}>
+               {displayName}
+             </p>
+             <p className="text-[8px] font-black text-emerald-400 uppercase tracking-widest truncate" title={roleLabel}>
+               {roleLabel}
              </p>
           </div>
         </div>
