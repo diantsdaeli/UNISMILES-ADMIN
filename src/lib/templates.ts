@@ -399,14 +399,61 @@ export function validateTemplatePayload(
       }
     }
 
-    // Validasi deteksi aset simulasi (sim-*) untuk perlindungan payload backend sungguhan
+    // 4.a Deteksi & Penolakan Mutlak Blob URL (Blob hanya ada di memori peramban lokal dan rusak saat dikirim)
+    const hasBlobUrl = (
+      (typeof payload.image_url === 'string' && payload.image_url.startsWith('blob:')) ||
+      (typeof cfg.overlayUrl === 'string' && cfg.overlayUrl.startsWith('blob:')) ||
+      (typeof cfg.backgroundConfig?.imageUrl === 'string' && cfg.backgroundConfig.imageUrl.startsWith('blob:')) ||
+      (Array.isArray(cfg.elements) && cfg.elements.some((el: any) =>
+        String(el.url || '').startsWith('blob:') || String(el.content || '').startsWith('blob:')
+      )) ||
+      (Array.isArray(cfg.assetElements) && cfg.assetElements.some((el: any) =>
+        String(el.url || '').startsWith('blob:') || String(el.content || '').startsWith('blob:')
+      ))
+    );
+
+    if (hasBlobUrl) {
+      errors.push('URL blob (blob:...) tidak dapat disimpan ke server karena hanya valid di memori peramban lokal.');
+    }
+
+    // 4.b Deteksi & Penolakan Data URI Biner Lokal untuk Produksi (Kecuali SVG bawaan)
+    const isBinaryDataUri = (val?: string) => {
+      if (!val || typeof val !== 'string') return false;
+      return val.startsWith('data:image/') && !val.startsWith('data:image/svg+xml');
+    };
+
+    const hasBinaryDataUri = (
+      isBinaryDataUri(payload.image_url) ||
+      isBinaryDataUri(cfg.overlayUrl) ||
+      isBinaryDataUri(cfg.backgroundConfig?.imageUrl) ||
+      (Array.isArray(cfg.assetElements) && cfg.assetElements.some((el: any) =>
+        isBinaryDataUri(el.url) || isBinaryDataUri(el.content)
+      ))
+    );
+
+    if (hasBinaryDataUri) {
+      if (options?.disallowSimulatedAssets || ENABLE_BACKEND_MUTATIONS) {
+        errors.push('Aset gambar frame produksi wajib diunggah ke backend (/uploads/...) dan tidak boleh menggunakan Data URI biner lokal.');
+      } else {
+        warnings.push('Frame memuat Data URI gambar lokal; pastikan diunggah ke server sebelum rilis produksi.');
+      }
+    }
+
+    // 4.c Validasi deteksi aset simulasi (sim-*) untuk perlindungan payload backend sungguhan
     const hasSimulatedAsset = (
       (typeof cfg.overlayUrl === 'string' && cfg.overlayUrl.includes('sim-')) ||
       (typeof payload.image_url === 'string' && payload.image_url.includes('sim-')) ||
+      (typeof cfg.backgroundConfig?.imageUrl === 'string' && cfg.backgroundConfig.imageUrl.includes('sim-')) ||
       (Array.isArray(cfg.elements) && cfg.elements.some((el: any) =>
         String(el.id || '').includes('sim-') ||
         String(el.url || '').includes('sim-') ||
         String(el.content || '').includes('sim-')
+      )) ||
+      (Array.isArray(cfg.assetElements) && cfg.assetElements.some((el: any) =>
+        String(el.id || '').includes('sim-') ||
+        String(el.url || '').includes('sim-') ||
+        String(el.content || '').includes('sim-') ||
+        String(el.assetId || '').includes('sim-')
       ))
     );
 
@@ -427,9 +474,106 @@ export function validateTemplatePayload(
 }
 
 /**
+ * Daftar Host Backend Produksi yang Dilindungi (Blacklist Pertahanan Berlapis)
+ */
+export const KNOWN_PRODUCTION_HOSTS: readonly string[] = [
+  'backend-photobooth.uniinside.net',
+  'api.uniinside.net',
+];
+
+/**
+ * Daftar Host Staging yang Telah Diverifikasi Secara Formal (Allowlist Eksplisit - Fail-Closed).
+ *
+ * KRITERIA WAJIB UNTUK MASUK ALLOWLIST:
+ * 1. Database terpisah secara fisik/skema dari basis data produksi (bukti isolasi terverifikasi).
+ * 2. Tidak ada replikasi dua arah yang dapat mengubah data produksi.
+ * 3. Surat persetujuan tertulis dari pemilik sistem untuk pengujian mutasi aktif.
+ *
+ * SAAT INI SENGAJA KOSONG (FAIL-CLOSED):
+ * Belum ada backend staging terisolasi resmi yang diverifikasi.
+ * Setiap upaya mutasi HTTP nyata akan DITOLAK sampai host staging resmi didaftarkan di sini.
+ */
+export const VERIFIED_STAGING_ALLOWLIST: readonly string[] = [
+  // Belum ada staging terisolasi resmi yang diverifikasi
+];
+
+/**
+ * Memeriksa apakah sebuah URL mengarah ke host backend produksi yang diblacklist
+ */
+export function isProductionApiUrl(url?: string | null): boolean {
+  if (!url || typeof url !== 'string') return false;
+  try {
+    const parsed = new URL(url.startsWith('http') ? url : `http://${url}`);
+    const hostname = parsed.hostname.toLowerCase();
+    return KNOWN_PRODUCTION_HOSTS.some(prodHost =>
+      hostname === prodHost || hostname.endsWith(`.${prodHost}`)
+    );
+  } catch (_) {
+    const lower = url.toLowerCase();
+    return KNOWN_PRODUCTION_HOSTS.some(prodHost => lower.includes(prodHost));
+  }
+}
+
+/**
+ * Memeriksa apakah sebuah URL merupakan staging terverifikasi yang sah.
+ * Menerapkan prinsip FAIL-CLOSED:
+ * - Tidak otomatis menganggap localhost, 127.0.0.1, atau nama mengandung 'staging' sebagai staging terisolasi.
+ * - Host wajib terdaftar di VERIFIED_STAGING_ALLOWLIST.
+ * - Host tidak boleh berada di KNOWN_PRODUCTION_HOSTS.
+ */
+export function isVerifiedStagingHost(url?: string | null): boolean {
+  if (!url || typeof url !== 'string') return false;
+  if (isProductionApiUrl(url)) return false;
+
+  try {
+    const parsed = new URL(url.startsWith('http') ? url : `http://${url}`);
+    const hostname = parsed.hostname.toLowerCase();
+    return VERIFIED_STAGING_ALLOWLIST.includes(hostname);
+  } catch (_) {
+    return false;
+  }
+}
+
+/**
+ * Validator Safeguard Mutasi Backend (Fail-Closed Enforcer):
+ * Memastikan bahwa mutasi HTTP nyata HANYA dapat berjalan jika:
+ * 1. Host target bukan host produksi (KNOWN_PRODUCTION_HOSTS).
+ * 2. Jika bukan mock test client terisolasi (customApi):
+ *    - ENABLE_BACKEND_MUTATIONS wajib bernilai true.
+ *    - Host target terdaftar secara resmi di VERIFIED_STAGING_ALLOWLIST.
+ *
+ * Catatan Arsitektur Penting:
+ * Pemeriksaan hostname pada frontend tidak dapat menjamin isolasi database backend
+ * (misalnya server lokal yang diam-diam menyambung ke basis data produksi).
+ * Isolasi database sejati tetap WAJIB diverifikasi pada level infrastruktur backend.
+ */
+export function assertMutationAllowed(targetBaseUrl: string, isCustomApi = false): void {
+  // 1. Blokir mutlak jika mengarah ke host produksi (Defense in Depth)
+  if (isProductionApiUrl(targetBaseUrl)) {
+    throw new Error(
+      `PERLINDUNGAN PRODUKSI: Mutasi HTTP (${targetBaseUrl}) ke backend produksi dilarang secara permanen! Mutasi hanya diizinkan pada lingkungan staging terisolasi.`
+    );
+  }
+
+  // 2. Safeguard Fail-Closed: Jika pemanggilan menggunakan client aplikasi utama
+  if (!isCustomApi) {
+    if (!ENABLE_BACKEND_MUTATIONS) {
+      throw new Error(
+        `SAFEGUARD FAIL-CLOSED: ENABLE_BACKEND_MUTATIONS berstatus false. Mutasi HTTP backend dinonaktifkan secara default untuk melindungi data produksi.`
+      );
+    }
+    if (!isVerifiedStagingHost(targetBaseUrl)) {
+      throw new Error(
+        `SAFEGUARD STAGING (FAIL-CLOSED): Mutasi backend ditolak. Host (${targetBaseUrl || 'undefined'}) belum diverifikasi di VERIFIED_STAGING_ALLOWLIST dengan bukti isolasi basis data. Mengubah VITE_API_BASE_URL saja tidak membuktikan isolasi lingkungan.`
+      );
+    }
+  }
+}
+
+/**
  * Flag Safeguard Mutasi Backend:
  * Menjamin TIDAK ADA request POST/PUT/DELETE yang dieksekusi ke backend produksi
- * pada Tahap 3B/3C sampai persetujuan izin tertulis diberikan.
+ * pada Tahap 3B/3C/3G sampai persetujuan izin tertulis diberikan.
  */
 export const ENABLE_BACKEND_MUTATIONS = false;
 
@@ -503,11 +647,16 @@ export async function createTemplate(
     };
   }
 
+  const client = options?.customApi ?? api;
+  const targetBaseUrl = client.defaults.baseURL || '';
+
+  // Safeguard Fail-Closed & Blacklist Check
+  assertMutationAllowed(targetBaseUrl, Boolean(options?.customApi));
+
   if (!validation.valid) {
     throw new Error(`Validasi payload gagal: ${validation.errors.join('; ')}`);
   }
 
-  const client = options?.customApi ?? api;
   const response = await client.post('/admin/templates/generate', payload);
   return response.data;
 }
@@ -538,11 +687,16 @@ export async function updateTemplate(
     };
   }
 
+  const client = options?.customApi ?? api;
+  const targetBaseUrl = client.defaults.baseURL || '';
+
+  // Safeguard Fail-Closed & Blacklist Check
+  assertMutationAllowed(targetBaseUrl, Boolean(options?.customApi));
+
   if (!validation.valid) {
     throw new Error(`Validasi payload gagal: ${validation.errors.join('; ')}`);
   }
 
-  const client = options?.customApi ?? api;
   const response = await client.put(`/admin/templates/${id}`, payload);
   return response.data;
 }

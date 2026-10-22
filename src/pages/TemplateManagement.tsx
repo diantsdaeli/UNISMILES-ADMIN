@@ -32,7 +32,8 @@ import {
   deleteReusableAsset, 
   ReusableAsset, 
   resolveAssetUrl,
-  validateAssetUpload
+  validateAssetUpload,
+  checkAssetUsageInTemplates
 } from '../lib/assets';
 import { StickerThumbnail } from '../components/StickerThumbnail';
 import { RemoveBgModal } from '../components/RemoveBgModal';
@@ -171,16 +172,52 @@ export const TemplateManagement: React.FC = () => {
     }
   };
 
-  // Handler Hapus Aset dengan Konfirmasi & Konsistensi State
+  // Handler Hapus Aset dengan Pemblokiran Mutlak Fail-Closed (Safeguard Tahap 3G Final Safety Patch)
   const handleDeleteAsset = async (asset: ReusableAsset) => {
     if (isAssetSubmitting) return;
 
+    // 1. Audit dependensi aset dengan prinsip FAIL-CLOSED
+    const isCompleteAndVerified = !loading && !error;
+    const usage = checkAssetUsageInTemplates(asset.id, {
+      assetUrl: asset.url,
+      resolvedUrl: asset.resolvedUrl,
+      isCompleteAndVerified,
+      isLoading: loading,
+      hasError: Boolean(error),
+      isPaginatedIncomplete: false,
+    }, templates);
+
+    // 2. Jika data penggunaan aset belum lengkap / loading / error / belum terverifikasi: BLOKIR MUTLAK
+    if (usage.isIncompleteData) {
+      toast.error(
+        'Penghapusan aset ditolak karena data penggunaan aset belum dapat diverifikasi secara lengkap. Muat ulang daftar template dan coba kembali.'
+      );
+      return;
+    }
+
+    // 3. Jika aset terdeteksi sedang digunakan oleh template (aktif maupun draft): BLOKIR MUTLAK
+    if (usage.inUse) {
+      const templateListStr = usage.usedBy.join(', ');
+      toast.error(
+        `Penghapusan ditolak: Aset "${asset.name}" sedang digunakan oleh template [${templateListStr}]. Hapus referensi aset dari frame tersebut terlebih dahulu untuk mencegah kerusakan tampilan frame di Kiosk.`
+      );
+      return;
+    }
+
+    // 4. Jika data terverifikasi lengkap dan aset tidak digunakan sama sekali, minta konfirmasi pengguna
     const confirmed = window.confirm(`Apakah Anda yakin ingin menghapus aset "${asset.name}"?`);
     if (!confirmed) return;
 
     setIsAssetSubmitting(true);
     try {
-      const res = await deleteReusableAsset(asset.id);
+      const res = await deleteReusableAsset(asset.id, {
+        templates,
+        assetUrl: asset.url,
+        resolvedUrl: asset.resolvedUrl,
+        isCompleteAndVerified,
+        isLoading: loading,
+        hasError: Boolean(error),
+      });
       setStickersList(prev => prev.filter(a => String(a.id) !== String(asset.id)));
       if (res.simulated) {
         toast.info(res.message || `Aset "${asset.name}" dihapus dari penyimpanan lokal saja.`);
