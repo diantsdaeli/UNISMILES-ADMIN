@@ -42,6 +42,7 @@ import { cn } from '../lib/utils';
 import { toast } from 'sonner';
 import { useKiosks } from '../KioskContext';
 import { useAuth } from '../components/AuthProvider';
+import { PrinterConfiguration } from '../components/PrinterConfiguration';
 
 interface KioskConfigPageProps {
   kiosk: any;
@@ -49,7 +50,7 @@ interface KioskConfigPageProps {
   onUpdate: (id: string, updates: any) => void;
 }
 
-type TabType = 'hardware' | 'pricing' | 'customization' | 'branding' | 'operasional' | 'gallery' | 'display';
+type TabType = 'hardware' | 'printer' | 'pricing' | 'customization' | 'branding' | 'operasional' | 'gallery' | 'display';
 
 export const KioskConfigPage: React.FC<KioskConfigPageProps> = ({ kiosk, onBack, onUpdate }) => {
   const DEFAULT_CONFIG = {
@@ -271,6 +272,7 @@ export const KioskConfigPage: React.FC<KioskConfigPageProps> = ({ kiosk, onBack,
 
   const tabs = [
     { id: 'hardware', label: 'Hardware', icon: Cpu },
+    { id: 'printer', label: 'Printer Configuration', icon: Printer },
     { id: 'pricing', label: 'Session & Pricing', icon: DollarSign },
     { id: 'display', label: 'Display Settings', icon: Monitor },
     { id: 'customization', label: 'Customization', icon: Palette },
@@ -560,6 +562,18 @@ export const KioskConfigPage: React.FC<KioskConfigPageProps> = ({ kiosk, onBack,
                   </div>
                 </div>
               </div>
+            </motion.div>
+          )}
+
+          {activeTab === 'printer' && (
+            <motion.div
+              key="printer"
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              transition={{ duration: 0.2 }}
+            >
+              <PrinterConfiguration kiosk={kiosk} />
             </motion.div>
           )}
 
