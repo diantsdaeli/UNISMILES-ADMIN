@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <!-- Big Pink Star -->
+  <path d="M42 20 L46 36 L62 40 L46 44 L42 60 L38 44 L22 40 L38 36 Z" fill="#FF80AB" stroke="#C2185B" stroke-width="2" stroke-linejoin="round"/>
+  <!-- Medium Yellow Star -->
+  <path d="M72 48 L75 58 L85 61 L75 64 L72 74 L69 64 L59 61 L69 58 Z" fill="#FFF59D" stroke="#F57F17" stroke-width="1.8" stroke-linejoin="round"/>
+  <!-- Small Blue Star -->
+  <path d="M26 66 L28 73 L35 75 L28 77 L26 84 L24 77 L17 75 L24 73 Z" fill="#80D8FF" stroke="#0091EA" stroke-width="1.5" stroke-linejoin="round"/>
+  <circle cx="70" cy="24" r="2.5" fill="#FFD54F"/>
+  <circle cx="20" cy="28" r="2" fill="#FF80AB"/>
+</svg>

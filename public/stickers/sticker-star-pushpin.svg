@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <!-- Shadow -->
+  <ellipse cx="54" cy="62" rx="18" ry="8" fill="#000000" opacity="0.25"/>
+  <!-- Pin Needle -->
+  <line x1="50" y1="48" x2="54" y2="62" stroke="#78909C" stroke-width="3" stroke-linecap="round"/>
+  <!-- Star Head -->
+  <polygon points="50,18 56,32 72,32 58,42 64,56 50,46 36,56 42,42 28,32 44,32" fill="#FFEE58" stroke="#F57F17" stroke-width="2.5" stroke-linejoin="round"/>
+  <polygon points="50,24 54,34 64,34 56,40 60,50 50,42 40,50 44,40 36,34 46,34" fill="#FFF9C4"/>
+</svg>

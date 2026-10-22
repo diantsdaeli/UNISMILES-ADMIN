@@ -13,7 +13,9 @@
     "test:stage3b": "tsx tests/stage3b_safeguard.test.ts",
     "test:stage3c": "tsx tests/stage3c_isolated_integration.test.ts",
     "test:stage3d": "tsx tests/stage3d_asset_integration.test.ts",
-    "test": "tsx tests/stage2_fixes.test.ts && tsx tests/stage3b_safeguard.test.ts && tsx tests/stage3c_isolated_integration.test.ts && tsx tests/stage3d_asset_integration.test.ts"
+    "test:stage3e": "tsx tests/stage3e_e2e_compatibility.test.ts",
+    "test:revisions": "tsx tests/stage3e_revisions.test.ts",
+    "test": "tsx tests/stage2_fixes.test.ts && tsx tests/stage3b_safeguard.test.ts && tsx tests/stage3c_isolated_integration.test.ts && tsx tests/stage3d_asset_integration.test.ts && tsx tests/stage3e_e2e_compatibility.test.ts && tsx tests/stage3e_revisions.test.ts"
   },
   "dependencies": {
     "@google/genai": "^1.29.0",

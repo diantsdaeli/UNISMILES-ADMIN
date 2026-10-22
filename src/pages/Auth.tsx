@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { Sparkles, User, Lock, ArrowRight, Loader2, AlertCircle, Camera, Zap, LogIn } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../lib/utils';
@@ -7,6 +8,8 @@ import { useAuth } from '../components/AuthProvider';
 import { toast } from 'sonner';
 
 export const Auth: React.FC = () => {
+  const navigate = useNavigate();
+  const location = useLocation();
   const { login } = useAuth();
   const [isLogin, setIsLogin] = useState(true);
   const [email, setEmail] = useState('');
@@ -39,6 +42,14 @@ export const Auth: React.FC = () => {
       const { token, user } = parseAuthResponse(response.data);
       login(token, user);
       toast.success('Login berhasil! Selamat datang kembali.');
+
+      // Pengalihan default resmi: Arahkan ke /dashboard (atau deep-link jika dibuka spesifik)
+      const from = (location.state as any)?.from?.pathname;
+      if (from && from !== '/' && from !== '/login') {
+        navigate(from, { replace: true });
+      } else {
+        navigate('/dashboard', { replace: true });
+      }
     } catch (err: any) {
       console.error('Login request failed:', err?.message || 'Unknown network error');
 

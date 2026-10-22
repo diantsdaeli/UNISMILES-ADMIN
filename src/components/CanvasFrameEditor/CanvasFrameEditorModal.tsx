@@ -52,6 +52,8 @@ import { useTemplate } from '../../TemplateContext';
 import { ReusableAsset, fetchCombinedAssets, uploadReusableAsset, resolveAssetUrl } from '../../lib/assets';
 import { CanvasPreview } from './CanvasPreview';
 import { GradientStopEditor } from './GradientStopEditor';
+import { StickerThumbnail } from '../StickerThumbnail';
+import { RemoveBgModal } from '../RemoveBgModal';
 import { cn } from '../../lib/utils';
 import { resolvePublicUrl } from '../../lib/urls';
 
@@ -191,11 +193,15 @@ export const CanvasFrameEditorModal: React.FC<CanvasFrameEditorModalProps> = ({
     setSelectedAssetId(null);
   }, [isOpen, editingTemplate, passedPreset]);
 
-  // Load Reusable Assets for Stickers & Overlays (backend + local storage)
+  // Background Removal Modal State (PNG Only)
+  const [removeBgFile, setRemoveBgFile] = useState<File | null>(null);
+  const [isRemoveBgOpen, setIsRemoveBgOpen] = useState<boolean>(false);
+
+  // Load Reusable Assets for Stickers & Overlays (backend + local storage + scrapbook stickers)
   useEffect(() => {
     if (!isOpen) return;
     setLoadingAssets(true);
-    fetchCombinedAssets('all')
+    fetchCombinedAssets('all', { includeDefaults: true })
       .then(assets => {
         setBackendAssets(assets);
       })
@@ -229,33 +235,45 @@ export const CanvasFrameEditorModal: React.FC<CanvasFrameEditorModalProps> = ({
     e.target.value = '';
   };
 
-  // Handler Upload Asset Baru dari Tab Asset
-  const handleUploadNewAsset = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Handler Upload Asset Baru dari Tab Asset (PNG Only + Auto Background Removal)
+  const handleUploadNewAsset = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    const ext = file.name.split('.').pop()?.toLowerCase();
+    if (ext !== 'png') {
+      toast.error('Upload stiker hanya menerima format berkas PNG.');
+      e.target.value = '';
+      return;
+    }
+
+    setRemoveBgFile(file);
+    setIsRemoveBgOpen(true);
+    e.target.value = '';
+  };
+
+  // Callback konfirmasi dari RemoveBgModal setelah background berhasil dihapus
+  const handleConfirmRemoveBgSave = async (
+    processedDataUrl: string,
+    assetName: string,
+    originalFile: File
+  ) => {
     setAssetUploading(true);
     try {
-      const asset = await uploadReusableAsset(file, newAssetName.trim() || file.name, 'sticker');
-      setBackendAssets(prev => [asset, ...prev]);
+      const asset = await uploadReusableAsset(originalFile, assetName, 'sticker', {
+        dataUrl: processedDataUrl,
+      });
+      setBackendAssets(prev => [asset, ...prev.filter(a => String(a.id) !== String(asset.id))]);
       setNewAssetName('');
-      toast.success(`Aset "${asset.name}" berhasil diunggah.`);
-    } catch {
-      // Local fallback jika backend upload dibatasi
-      const localUrl = URL.createObjectURL(file);
-      const mockAsset: ReusableAsset = {
-        id: `local-${Date.now()}`,
-        name: newAssetName.trim() || file.name,
-        type: 'sticker',
-        url: localUrl,
-        is_active: true,
-      };
-      setBackendAssets(prev => [mockAsset, ...prev]);
-      setNewAssetName('');
-      toast.info(`Aset "${mockAsset.name}" dimuat ke katalog lokal.`);
+      setIsRemoveBgOpen(false);
+      setRemoveBgFile(null);
+      // Langsung tambahkan stiker ke kanvas untuk kenyamanan pengguna
+      handleAddAssetToCanvas(asset);
+      toast.success(`Stiker transparan "${asset.name}" berhasil ditambahkan ke kanvas.`);
+    } catch (err: any) {
+      toast.error(err?.message || 'Gagal menyimpan stiker transparan.');
     } finally {
       setAssetUploading(false);
-      e.target.value = '';
     }
   };
 
@@ -310,8 +328,8 @@ export const CanvasFrameEditorModal: React.FC<CanvasFrameEditorModalProps> = ({
       content: asset.url,
       x: 35,
       y: 40,
-      width: 25,
-      height: 15,
+      width: 20,
+      height: 20,
       opacity: 1,
       rotation: 0,
     };
@@ -912,7 +930,7 @@ export const CanvasFrameEditorModal: React.FC<CanvasFrameEditorModalProps> = ({
                   <input
                     ref={assetFileInputRef}
                     type="file"
-                    accept="image/png,image/jpeg,image/jpg,image/webp"
+                    accept="image/png,.png"
                     onChange={handleUploadNewAsset}
                     className="hidden"
                   />
@@ -928,7 +946,7 @@ export const CanvasFrameEditorModal: React.FC<CanvasFrameEditorModalProps> = ({
                     ) : (
                       <Upload className="w-3 h-3" />
                     )}
-                    {assetUploading ? 'Mengunggah...' : '+ UPLOAD'}
+                    {assetUploading ? 'Memproses...' : '+ UPLOAD STIKER (PNG)'}
                   </button>
                 </div>
 
@@ -1023,43 +1041,22 @@ export const CanvasFrameEditorModal: React.FC<CanvasFrameEditorModalProps> = ({
                   ) : backendAssets.length === 0 ? (
                     <p className="text-[9px] text-muted text-center py-4">Belum ada aset tersimpan.</p>
                   ) : (
-                    <div className="space-y-2 max-h-64 overflow-y-auto custom-scrollbar pr-1">
+                    <div className="grid grid-cols-4 gap-2 max-h-80 overflow-y-auto custom-scrollbar p-1">
                       {backendAssets.map(asset => (
-                        <div
+                        <StickerThumbnail
                           key={asset.id}
-                          className="p-2 bg-black/40 border border-white/5 hover:border-white/20 rounded-xl flex items-center gap-2.5 transition-all"
-                        >
-                          <div className="w-10 h-10 rounded-lg bg-black/60 border border-white/10 flex items-center justify-center overflow-hidden flex-shrink-0">
-                            <img
-                              src={resolveAssetUrl(asset.url)}
-                              alt={asset.name}
-                              className="w-full h-full object-contain"
-                              onError={e => {
-                                (e.target as HTMLElement).style.display = 'none';
-                              }}
-                            />
-                          </div>
-
-                          <div className="min-w-0 flex-1">
-                            <p className="text-[9px] font-bold text-foreground truncate">{asset.name}</p>
-                            <div className="flex items-center gap-1.5 mt-1">
-                              <button
-                                type="button"
-                                onClick={() => handleSetAssetAsBackground(asset)}
-                                className="px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 text-[8px] font-bold border border-emerald-500/30 transition-all cursor-pointer"
-                              >
-                                🖼 Set BG
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => handleAddAssetToCanvas(asset)}
-                                className="px-1.5 py-0.5 rounded bg-primary/20 text-primary hover:bg-primary/30 text-[8px] font-bold border border-primary/30 transition-all cursor-pointer"
-                              >
-                                + Stiker
-                              </button>
-                            </div>
-                          </div>
-                        </div>
+                          asset={asset}
+                          mode="editor"
+                          onClick={() => handleAddAssetToCanvas(asset)}
+                          onAddSticker={(e) => {
+                            e.stopPropagation();
+                            handleAddAssetToCanvas(asset);
+                          }}
+                          onSetBg={(e) => {
+                            e.stopPropagation();
+                            handleSetAssetAsBackground(asset);
+                          }}
+                        />
                       ))}
                     </div>
                   )}
@@ -1288,6 +1285,18 @@ export const CanvasFrameEditorModal: React.FC<CanvasFrameEditorModalProps> = ({
           </div>
         </div>
       )}
+
+      {/* Modal Auto Background Removal untuk Upload PNG Stiker */}
+      <RemoveBgModal
+        isOpen={isRemoveBgOpen}
+        file={removeBgFile}
+        onClose={() => {
+          setIsRemoveBgOpen(false);
+          setRemoveBgFile(null);
+        }}
+        onConfirm={handleConfirmRemoveBgSave}
+        isSubmitting={assetUploading}
+      />
     </div>
   );
 };

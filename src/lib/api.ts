@@ -93,13 +93,14 @@ api.interceptors.response.use(
 
     // 1. Tangani 401 Unauthorized (Token expired, revoked, atau sesi tidak valid)
     if (status === 401 && !isLoginRequest) {
+      const hadToken = !!(localStorage.getItem('unismiles_token') || sessionStorage.getItem('unismiles_token'));
       localStorage.removeItem('unismiles_token');
       localStorage.removeItem('unismiles_user');
       sessionStorage.removeItem('unismiles_token');
       sessionStorage.removeItem('unismiles_user');
 
-      // Arahkan ke halaman login jika berada di halaman terproteksi
-      if (window.location.pathname !== '/' && !window.location.pathname.startsWith('/login')) {
+      // Arahkan ke halaman login HANYA jika pengguna sebelumnya terautentikasi dan berada di rute terproteksi
+      if (hadToken && typeof window !== 'undefined' && window.location.pathname !== '/' && !window.location.pathname.startsWith('/login')) {
         window.location.href = '/';
       }
     }

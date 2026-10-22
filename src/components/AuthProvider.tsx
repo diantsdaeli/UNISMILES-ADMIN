@@ -19,6 +19,7 @@ interface AuthContextType {
   token: string | null;
   loading: boolean;
   isAuthenticated: boolean;
+  sessionVerified: boolean;
   isSuperAdmin: boolean;
   isAdminMitra: boolean;
   login: (token: string, userData: any) => void;
@@ -32,6 +33,7 @@ const AuthContext = createContext<AuthContextType>({
   token: null,
   loading: true,
   isAuthenticated: false,
+  sessionVerified: false,
   isSuperAdmin: false,
   isAdminMitra: false,
   login: () => { },
@@ -68,31 +70,26 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [user, setUser] = useState<User | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
+  const [sessionVerified, setSessionVerified] = useState<boolean>(false);
 
   // Verifikasi sesi token dengan backend (/api/v1/auth/me)
   const verifySession = useCallback(async () => {
     const storedToken = localStorage.getItem('unismiles_token') || sessionStorage.getItem('unismiles_token');
-    const storedUserJson = localStorage.getItem('unismiles_user') || sessionStorage.getItem('unismiles_user');
 
     if (!storedToken) {
       setToken(null);
       setUser(null);
+      setSessionVerified(false);
       setLoading(false);
       return;
     }
 
     setToken(storedToken);
-
-    // Tampilkan data cache sementara agar UI tidak flicker
-    if (storedUserJson) {
-      try {
-        const cachedUser = JSON.parse(storedUserJson);
-        setUser(formatUserProfile(cachedUser));
-      } catch (_) { }
-    }
+    setLoading(true);
 
     try {
-      const response = await api.get('/auth/me');
+      // Gunakan timeout singkat (4 detik) agar tidak blocking jika server lambat
+      const response = await api.get('/auth/me', { timeout: 4000 });
       const rawUser = getAuthUser(response.data);
       if (!rawUser) {
         throw new Error('Data profil user tidak ditemukan pada respons /auth/me');
@@ -100,23 +97,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       const formatted = formatUserProfile(rawUser);
       setUser(formatted);
+      setSessionVerified(true);
       localStorage.setItem('unismiles_user', JSON.stringify(formatted));
     } catch (err: any) {
-      const status = err?.response?.status;
-      const message = String(err?.response?.data?.message || '').toLowerCase();
+      console.warn('Verifikasi sesi /auth/me gagal atau sesi kedaluwarsa:', err?.message || err);
 
-      // Jika token kedaluwarsa atau akun nonaktif, bersihkan sesi
-      if (status === 401 || (status === 403 && (message.includes('inactive') || message.includes('nonaktif')))) {
-        localStorage.removeItem('unismiles_token');
-        localStorage.removeItem('unismiles_user');
-        sessionStorage.removeItem('unismiles_token');
-        sessionStorage.removeItem('unismiles_user');
-        setToken(null);
-        setUser(null);
-      } else {
-        // Jika offline atau error jaringan, pertahankan sesi lokal dengan peringatan
-        console.warn('Gagal memverifikasi sesi dengan backend (mungkin server offline):', err.message);
-      }
+      // Tutup akses terlindungi seketika untuk mencegah flash konten atau bypass sesi tidak sah
+      localStorage.removeItem('unismiles_token');
+      localStorage.removeItem('unismiles_user');
+      sessionStorage.removeItem('unismiles_token');
+      sessionStorage.removeItem('unismiles_user');
+      setToken(null);
+      setUser(null);
+      setSessionVerified(false);
     } finally {
       setLoading(false);
     }
@@ -137,6 +130,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     setToken(newToken);
     setUser(formatted);
+    setSessionVerified(true);
+    setLoading(false);
   };
 
   const logout = () => {
@@ -147,12 +142,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     setToken(null);
     setUser(null);
+    setSessionVerified(false);
+    setLoading(false);
   };
 
   const currentRole = user?.role || null;
-  const isSuperAdmin = currentRole === 'Super Admin' || currentRole === 'admin';
-  const isAdminMitra = currentRole === 'Admin Mitra' || currentRole === 'owner' || currentRole === 'operator';
-  const isAuthenticated = Boolean(token && user);
+  // Super Admin HANYA aktif jika sesi telah diverifikasi secara sah oleh server
+  const isSuperAdmin = Boolean(
+    sessionVerified && 
+    (currentRole === 'Super Admin' || currentRole === 'admin' || currentRole === 'super_admin')
+  );
+  const isAdminMitra = Boolean(
+    sessionVerified && 
+    (currentRole === 'Admin Mitra' || currentRole === 'owner' || currentRole === 'operator' || currentRole === 'admin_mitra')
+  );
+  const isAuthenticated = Boolean(sessionVerified && token && user);
 
   return (
     <AuthContext.Provider
@@ -162,6 +166,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         token,
         loading,
         isAuthenticated,
+        sessionVerified,
         isSuperAdmin,
         isAdminMitra,
         login,

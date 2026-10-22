@@ -34,6 +34,8 @@ import {
   resolveAssetUrl,
   validateAssetUpload
 } from '../lib/assets';
+import { StickerThumbnail } from '../components/StickerThumbnail';
+import { RemoveBgModal } from '../components/RemoveBgModal';
 
 export const TemplateManagement: React.FC = () => {
   const navigate = useNavigate();
@@ -70,6 +72,10 @@ export const TemplateManagement: React.FC = () => {
   const [stickerSearch, setStickerSearch] = useState<string>('');
   const stickerFileInputRef = useRef<HTMLInputElement | null>(null);
 
+  // Background Removal Modal State (PNG Only)
+  const [removeBgFile, setRemoveBgFile] = useState<File | null>(null);
+  const [isRemoveBgOpen, setIsRemoveBgOpen] = useState<boolean>(false);
+
   // Templates for Active Layout
   const templatesForLayout = useMemo(
     () => templates.filter(t => t.layoutId === activeLayoutId),
@@ -103,11 +109,11 @@ export const TemplateManagement: React.FC = () => {
     }
   }, [activeLayoutId, templatesForLayout]);
 
-  // Load Sticker Library Assets (backend + local storage preserved)
+  // Load Sticker Library Assets (backend + local storage + default cute scrapbook stickers)
   useEffect(() => {
     if (activeMainTab !== 'stickers') return;
     setStickersLoading(true);
-    fetchCombinedAssets('all')
+    fetchCombinedAssets('all', { includeDefaults: true })
       .then(assets => {
         setStickersList(assets);
       })
@@ -119,35 +125,49 @@ export const TemplateManagement: React.FC = () => {
       });
   }, [activeMainTab]);
 
-  // Handler Upload Aset Stiker Baru dengan validasi & duplicate submit guard
-  const handleStickerFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Handler Upload Aset Stiker Baru (PNG Only + Auto Remove BG)
+  const handleStickerFileSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     if (isAssetSubmitting) return;
 
-    const validation = validateAssetUpload(file, file.name, 'sticker');
-    if (!validation.valid) {
-      toast.error(validation.errors[0] || 'Validasi berkas gagal.');
+    // Validasi ekstensi PNG wajib
+    const ext = file.name.split('.').pop()?.toLowerCase();
+    if (ext !== 'png') {
+      toast.error('Upload stiker hanya menerima format berkas PNG.');
       e.target.value = '';
       return;
     }
 
+    setRemoveBgFile(file);
+    setIsRemoveBgOpen(true);
+    e.target.value = '';
+  };
+
+  // Callback konfirmasi dari RemoveBgModal setelah background berhasil dihapus
+  const handleConfirmRemoveBgSave = async (
+    processedDataUrl: string,
+    assetName: string,
+    originalFile: File
+  ) => {
     setIsAssetSubmitting(true);
     try {
-      const defaultName = file.name.replace(/\.[^.]+$/, '');
-      const newAsset = await uploadReusableAsset(file, defaultName, 'sticker');
+      const newAsset = await uploadReusableAsset(originalFile, assetName, 'sticker', {
+        dataUrl: processedDataUrl,
+      });
       setStickersList(prev => [newAsset, ...prev.filter(a => String(a.id) !== String(newAsset.id))]);
+      setIsRemoveBgOpen(false);
+      setRemoveBgFile(null);
       if (newAsset.simulated) {
-        toast.info(`Aset "${newAsset.name}" disimpan secara lokal (mode aman).`);
+        toast.success(`Stiker transparan "${newAsset.name}" tersimpan ke katalog lokal.`);
       } else {
-        toast.success(`Aset "${newAsset.name}" berhasil diunggah.`);
+        toast.success(`Stiker "${newAsset.name}" berhasil diunggah.`);
       }
     } catch (err: any) {
-      toast.error(err?.response?.data?.message || err?.message || 'Gagal mengunggah aset.');
+      toast.error(err?.response?.data?.message || err?.message || 'Gagal menyimpan stiker.');
     } finally {
       setIsAssetSubmitting(false);
-      e.target.value = '';
     }
   };
 
@@ -573,7 +593,7 @@ export const TemplateManagement: React.FC = () => {
                   type="file"
                   ref={stickerFileInputRef}
                   onChange={handleStickerFileSelected}
-                  accept="image/png,image/jpeg,image/webp"
+                  accept="image/png,.png"
                   className="hidden"
                   data-testid="sticker-file-input"
                 />
@@ -591,7 +611,7 @@ export const TemplateManagement: React.FC = () => {
                   ) : (
                     <Upload className="w-3.5 h-3.5" />
                   )}
-                  Upload Stiker Baru
+                  Upload Stiker Baru (PNG)
                 </button>
               </div>
             </div>
@@ -633,14 +653,14 @@ export const TemplateManagement: React.FC = () => {
               </div>
             </div>
 
-            {/* Assets Grid */}
+            {/* Assets Grid: Compact Scrapbook Sticker Grid (64-80px thumbnails) with Safe Thumbnail Loading */}
             {stickersLoading ? (
               <div className="flex flex-col items-center justify-center py-20 gap-3">
                 <Loader2 className="w-8 h-8 animate-spin text-emerald-400" />
                 <p className="text-xs font-bold text-muted">Memuat katalog stiker...</p>
               </div>
             ) : (
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+              <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-7 lg:grid-cols-8 gap-2.5">
                 {stickersList
                   .filter(
                     a =>
@@ -649,54 +669,34 @@ export const TemplateManagement: React.FC = () => {
                         a.name.toLowerCase().includes(stickerSearch.toLowerCase().trim()))
                   )
                   .map(asset => (
-                    <div
+                    <StickerThumbnail
                       key={asset.id}
-                      className="p-3 bg-black/40 border border-white/5 hover:border-emerald-500/40 rounded-2xl flex flex-col items-center gap-2 transition-all group relative"
-                    >
-                      {/* Delete Asset Button */}
-                      <button
-                        type="button"
-                        title={`Hapus ${asset.name}`}
-                        disabled={isAssetSubmitting}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleDeleteAsset(asset);
-                        }}
-                        className="absolute top-2 right-2 p-1.5 rounded-lg bg-black/60 hover:bg-rose-500/20 text-muted hover:text-rose-400 border border-white/10 hover:border-rose-500/30 transition-all opacity-0 group-hover:opacity-100 cursor-pointer z-10"
-                      >
-                        <Trash2 className="w-3 h-3" />
-                      </button>
-
-                      <div className="w-full h-28 rounded-xl bg-black/60 border border-white/5 flex items-center justify-center p-2 overflow-hidden">
-                        <img
-                          src={asset.resolvedUrl || resolveAssetUrl(asset.url)}
-                          alt={asset.name}
-                          className="max-w-full max-h-full object-contain group-hover:scale-110 transition-transform duration-200"
-                          onError={e => {
-                            (e.target as HTMLElement).style.display = 'none';
-                          }}
-                        />
-                      </div>
-                      <div className="w-full text-center">
-                        <p className="text-[10px] font-bold text-foreground truncate">{asset.name}</p>
-                        <div className="flex items-center justify-center gap-1 mt-1">
-                          <span className="text-[8px] font-black uppercase tracking-wider text-emerald-400/80 bg-emerald-500/10 px-2 py-0.5 rounded-full inline-block">
-                            {asset.type}
-                          </span>
-                          {asset.isLocal && (
-                            <span className="text-[8px] font-black uppercase tracking-wider text-amber-400/80 bg-amber-500/10 px-1.5 py-0.5 rounded-full inline-block">
-                              Local
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    </div>
+                      asset={asset}
+                      mode="gallery"
+                      isDeleting={isAssetSubmitting}
+                      onDelete={(e) => {
+                        e.stopPropagation();
+                        handleDeleteAsset(asset);
+                      }}
+                    />
                   ))}
               </div>
             )}
           </div>
         </div>
       )}
+
+      {/* Modal Auto Background Removal untuk Upload PNG Stiker */}
+      <RemoveBgModal
+        isOpen={isRemoveBgOpen}
+        file={removeBgFile}
+        onClose={() => {
+          setIsRemoveBgOpen(false);
+          setRemoveBgFile(null);
+        }}
+        onConfirm={handleConfirmRemoveBgSave}
+        isSubmitting={isAssetSubmitting}
+      />
     </div>
   );
 };

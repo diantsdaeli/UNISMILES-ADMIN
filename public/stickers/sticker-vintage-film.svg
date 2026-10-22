@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <rect x="14" y="25" width="72" height="50" rx="4" fill="#263238" stroke="#000000" stroke-width="2.5"/>
+  <!-- Top sprocket holes -->
+  <rect x="20" y="28" width="6" height="5" rx="1" fill="#FFFFFF"/>
+  <rect x="32" y="28" width="6" height="5" rx="1" fill="#FFFFFF"/>
+  <rect x="44" y="28" width="6" height="5" rx="1" fill="#FFFFFF"/>
+  <rect x="56" y="28" width="6" height="5" rx="1" fill="#FFFFFF"/>
+  <rect x="68" y="28" width="6" height="5" rx="1" fill="#FFFFFF"/>
+  <!-- Frames -->
+  <rect x="22" y="38" width="24" height="24" rx="2" fill="#ECEFF1"/>
+  <path d="M26 56 L34 46 L42 56 Z" fill="#90A4AE"/>
+  <circle cx="38" cy="44" r="2.5" fill="#FFB74D"/>
+  <rect x="52" y="38" width="24" height="24" rx="2" fill="#ECEFF1"/>
+  <path d="M64 54 C58 48, 54 42, 60 38 C64 36, 68 40, 72 44 Z" fill="#F48FB1"/>
+  <!-- Bottom sprocket holes -->
+  <rect x="20" y="67" width="6" height="5" rx="1" fill="#FFFFFF"/>
+  <rect x="32" y="67" width="6" height="5" rx="1" fill="#FFFFFF"/>
+  <rect x="44" y="67" width="6" height="5" rx="1" fill="#FFFFFF"/>
+  <rect x="56" y="67" width="6" height="5" rx="1" fill="#FFFFFF"/>
+  <rect x="68" y="67" width="6" height="5" rx="1" fill="#FFFFFF"/>
+</svg>

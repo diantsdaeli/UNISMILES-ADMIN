@@ -15,6 +15,8 @@ export interface ReusableAsset {
   type: 'overlay' | 'sticker' | 'logo' | string;
   url: string; // Managed path (/uploads/assets/...) atau dataURL
   resolvedUrl?: string; // URL penuh untuk tag <img>
+  content?: string;
+  simulatedPath?: string;
   mime_type?: string;
   file_size?: number;
   is_active?: boolean;
@@ -121,16 +123,23 @@ export function getLocalStoredAssets(): ReusableAsset[] {
     if (!raw) return [];
     const list = JSON.parse(raw);
     if (!Array.isArray(list)) return [];
-    return list.map(item => ({
-      id: item.id || `local-${Math.random().toString(36).slice(2, 8)}`,
-      name: item.name || 'Local Sticker',
-      type: item.type || (item.category === 'Overlay' ? 'overlay' : 'sticker'),
-      url: item.content || item.url || '',
-      resolvedUrl: resolveAssetUrl(item.content || item.url || ''),
-      is_active: item.status !== 'inactive',
-      isLocal: true,
-      created_at: item.created_at || new Date().toISOString(),
-    }));
+    return list.map(item => {
+      const rawUrl = item.content || item.url || '';
+      const resolved = (rawUrl.startsWith('data:') || rawUrl.startsWith('blob:') || /^https?:\/\//i.test(rawUrl))
+        ? rawUrl
+        : resolveAssetUrl(rawUrl);
+
+      return {
+        id: item.id || `local-${Math.random().toString(36).slice(2, 8)}`,
+        name: item.name || 'Local Sticker',
+        type: item.type || (item.category === 'Overlay' ? 'overlay' : 'sticker'),
+        url: rawUrl,
+        resolvedUrl: resolved,
+        is_active: item.status !== 'inactive',
+        isLocal: true,
+        created_at: item.created_at || new Date().toISOString(),
+      };
+    });
   } catch (err) {
     console.warn('Gagal membaca local stored assets:', err);
     return [];
@@ -182,12 +191,20 @@ export async function fetchReusableAssets(
   return Array.isArray(data) ? data.map(normalizeAsset) : [];
 }
 
+import { getDefaultScrapbookAssets } from './scrapbookStickers';
+export { getDefaultScrapbookAssets };
+
+export interface FetchCombinedAssetOptions extends AssetExecutionOptions {
+  includeLocal?: boolean;
+  includeDefaults?: boolean;
+}
+
 /**
  * Mengambil daftar aset gabungan antara backend dan aset lokal (agar aset lokal tidak terhapus)
  */
 export async function fetchCombinedAssets(
   type?: string,
-  options?: AssetExecutionOptions & { includeLocal?: boolean }
+  options?: FetchCombinedAssetOptions
 ): Promise<ReusableAsset[]> {
   const client = options?.customApi ?? api;
   let backendAssets: ReusableAsset[] = [];
@@ -205,9 +222,11 @@ export async function fetchCombinedAssets(
   }
 
   const includeLocal = options?.includeLocal ?? true;
-  if (!includeLocal) return backendAssets;
+  let localAssets: ReusableAsset[] = [];
+  if (includeLocal) {
+    localAssets = getLocalStoredAssets().filter(a => !type || type === 'all' || a.type === type);
+  }
 
-  const localAssets = getLocalStoredAssets().filter(a => !type || type === 'all' || a.type === type);
   const backendIds = new Set(backendAssets.map(a => String(a.id)));
   const uniqueLocal = localAssets.filter(l => !backendIds.has(String(l.id)));
 
@@ -222,6 +241,18 @@ export async function fetchCombinedAssets(
     }
   }
 
+  // Sertakan aset stiker scrapbook bawaan jika diminta (misal di UI Gallery & Canvas Editor)
+  if (options?.includeDefaults) {
+    const defaults = getDefaultScrapbookAssets().filter(a => !type || type === 'all' || a.type === type);
+    for (const d of defaults) {
+      const strId = String(d.id);
+      if (!seenIds.has(strId)) {
+        seenIds.add(strId);
+        merged.push(d);
+      }
+    }
+  }
+
   return merged;
 }
 
@@ -233,7 +264,7 @@ export async function uploadReusableAsset(
   file: File,
   name: string,
   type: 'sticker' | 'logo' | 'overlay' = 'sticker',
-  options?: AssetExecutionOptions
+  options?: AssetExecutionOptions & { dataUrl?: string }
 ): Promise<ReusableAsset> {
   const validation = validateAssetUpload(file, name, type);
   if (!validation.valid) {
@@ -246,12 +277,32 @@ export async function uploadReusableAsset(
     // Mode Simulasi: Menahan HTTP request mutasi ke produksi
     const safeFilename = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
     const simulatedPath = `/uploads/assets/sim-${Date.now()}-${safeFilename}`;
+
+    // Baca data URL asli atau gunakan dataUrl yang sudah diproses (misal hasil remove background)
+    let actualDataUrl = options?.dataUrl || '';
+    if (!actualDataUrl && typeof FileReader !== 'undefined') {
+      try {
+        actualDataUrl = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result as string);
+          reader.onerror = () => reject(new Error('Gagal membaca berkas'));
+          reader.readAsDataURL(file);
+        });
+      } catch (_) {
+        actualDataUrl = simulatedPath;
+      }
+    }
+
+    const finalUrl = actualDataUrl || simulatedPath;
+
     const simulatedAsset: ReusableAsset = {
       id: `sim-${Date.now()}`,
       name: name.trim() || file.name.replace(/\.[^.]+$/, ''),
       type,
-      url: simulatedPath,
-      resolvedUrl: resolvePublicUrl(simulatedPath),
+      url: finalUrl,
+      resolvedUrl: finalUrl,
+      content: finalUrl,
+      simulatedPath,
       mime_type: file.type || 'image/png',
       file_size: file.size,
       is_active: true,

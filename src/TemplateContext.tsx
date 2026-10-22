@@ -22,6 +22,13 @@ export const TemplateProvider: React.FC<{ children: ReactNode }> = ({ children }
   const [error, setError] = useState<string | null>(null);
 
   const loadTemplates = useCallback(async () => {
+    const token = localStorage.getItem('unismiles_token') || sessionStorage.getItem('unismiles_token');
+    if (!token) {
+      setLoading(false);
+      setTemplates([]);
+      return;
+    }
+
     setLoading(true);
     setError(null);
     try {

@@ -31,6 +31,7 @@ import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { cn } from './lib/utils';
 
 import { AuthProvider, useAuth, ErrorBoundary } from './components/AuthProvider';
+import { ProtectedRoute } from './components/ProtectedRoute';
 import { Toaster, toast } from 'sonner';
 
 import { TemplateProvider } from './TemplateContext';
@@ -38,8 +39,20 @@ import { KioskProvider } from './KioskContext';
 import { SessionProvider } from './SessionContext';
 
 function SuperAdminRoute({ children }: { children: React.ReactNode }) {
-  const { isSuperAdmin } = useAuth();
-  if (!isSuperAdmin) {
+  const { isSuperAdmin, loading, sessionVerified } = useAuth();
+
+  if (loading) {
+    return (
+      <div className="h-screen flex items-center justify-center bg-[#10172A]">
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin" />
+          <p className="text-xs font-black uppercase tracking-widest text-primary/60">Memverifikasi Sesi...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!sessionVerified || !isSuperAdmin) {
     toast.error('Akses Ditolak: Halaman ini hanya dapat diakses oleh Super Admin.');
     return <Navigate to="/dashboard" replace />;
   }
@@ -47,7 +60,7 @@ function SuperAdminRoute({ children }: { children: React.ReactNode }) {
 }
 
 function AppContent() {
-  const { user, role, loading, isSuperAdmin, logout } = useAuth();
+  const { user, role, loading, sessionVerified, isSuperAdmin, logout } = useAuth();
   const location = useLocation();
 
   const handleLogout = () => {
@@ -65,7 +78,7 @@ function AppContent() {
     );
   }
 
-  if (!user) {
+  if (!user || !sessionVerified) {
     return <Auth />;
   }
 

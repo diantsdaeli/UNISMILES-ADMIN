@@ -25,12 +25,13 @@ export function publicAssetOrigin(): string {
 
 export function resolvePublicUrl(url?: string | null): string {
   if (!url) return '';
-  if (/^https?:\/\//i.test(url)) return url;
+  if (/^(?:https?:|data:|blob:)/i.test(url)) return url;
   return `${publicAssetOrigin()}${url.startsWith('/') ? '' : '/'}${url}`;
 }
 
 export function toStoredAssetPath(url?: string | null): string {
   if (!url) return '';
+  if (/^(?:data:|blob:)/i.test(url)) return url;
   if (url.startsWith('/')) return url;
 
   try {

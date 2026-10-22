@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <polygon points="20,44 14,20 38,30" fill="#E0A96D" stroke="#4A3E3D" stroke-width="2.5" stroke-linejoin="round"/>
+  <polygon points="80,44 86,20 62,30" fill="#E0A96D" stroke="#4A3E3D" stroke-width="2.5" stroke-linejoin="round"/>
+  <polygon points="22,40 18,25 34,32" fill="#FFF275"/>
+  <polygon points="78,40 82,25 66,32" fill="#FFF275"/>
+  <ellipse cx="50" cy="56" rx="36" ry="30" fill="#E0A96D" stroke="#4A3E3D" stroke-width="2.5"/>
+  <path d="M22 62 Q36 46 50 56 Q64 46 78 62 Q70 86 50 86 Q30 86 22 62 Z" fill="#FFF8EE"/>
+  <circle cx="36" cy="48" r="3.5" fill="#4A3E3D"/>
+  <circle cx="64" cy="48" r="3.5" fill="#4A3E3D"/>
+  <ellipse cx="36" cy="42" rx="3" ry="1.5" fill="#FFF8EE"/>
+  <ellipse cx="64" cy="42" rx="3" ry="1.5" fill="#FFF8EE"/>
+  <ellipse cx="50" cy="59" rx="4.5" ry="3" fill="#4A3E3D"/>
+  <path d="M50 62 Q45 68 41 65 M50 62 Q55 68 59 65" stroke="#4A3E3D" stroke-width="1.8" stroke-linecap="round" fill="none"/>
+  <ellipse cx="26" cy="56" rx="4.5" ry="3" fill="#FF8A80" opacity="0.6"/>
+  <ellipse cx="74" cy="56" rx="4.5" ry="3" fill="#FF8A80" opacity="0.6"/>
+</svg>
