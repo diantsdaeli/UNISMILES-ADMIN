@@ -23,7 +23,8 @@
     "test:stage6": "tsx tests/stage6_session_management.test.ts",
     "test:stage7": "tsx tests/stage7_payment_transactions.test.ts",
     "test:stage7b": "tsx tests/stage7_user_management.test.ts",
-    "test": "tsx tests/stage2_fixes.test.ts && tsx tests/stage3b_safeguard.test.ts && tsx tests/stage3c_isolated_integration.test.ts && tsx tests/stage3d_asset_integration.test.ts && tsx tests/stage3e_e2e_compatibility.test.ts && tsx tests/stage3e_revisions.test.ts && tsx tests/stage3g_safe_staging.test.ts && tsx tests/stage4_printer_ui.test.ts && tsx tests/stage4c_printer_simulation.test.ts && tsx tests/stage5_kiosk_management.test.ts && tsx tests/stage5c_kiosk_contract.test.ts && tsx tests/stage6_session_management.test.ts && tsx tests/stage7_payment_transactions.test.ts && tsx tests/stage7_user_management.test.ts"
+    "test:stage8b": "tsx tests/stage8b_dashboard_filters.test.ts",
+    "test": "tsx tests/stage2_fixes.test.ts && tsx tests/stage3b_safeguard.test.ts && tsx tests/stage3c_isolated_integration.test.ts && tsx tests/stage3d_asset_integration.test.ts && tsx tests/stage3e_e2e_compatibility.test.ts && tsx tests/stage3e_revisions.test.ts && tsx tests/stage3g_safe_staging.test.ts && tsx tests/stage4_printer_ui.test.ts && tsx tests/stage4c_printer_simulation.test.ts && tsx tests/stage5_kiosk_management.test.ts && tsx tests/stage5c_kiosk_contract.test.ts && tsx tests/stage6_session_management.test.ts && tsx tests/stage7_payment_transactions.test.ts && tsx tests/stage7_user_management.test.ts && tsx tests/stage8b_dashboard_filters.test.ts"
   },
 
   "dependencies": {

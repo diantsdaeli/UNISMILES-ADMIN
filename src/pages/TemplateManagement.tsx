@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { 
-  Plus, 
-  Search, 
+import {
+  Plus,
+  Search,
   LayoutTemplate,
   ImageIcon,
   Sparkles,
@@ -16,34 +16,48 @@ import { useTemplate, Template } from '../TemplateContext';
 import { toast } from 'sonner';
 import { motion, AnimatePresence } from 'motion/react';
 import { useNavigate } from 'react-router-dom';
-import { 
-  LAYOUT_PRESETS, 
+import {
+  LAYOUT_PRESETS,
   LayoutPreset,
-  EVENT_CATEGORIES 
+  EVENT_CATEGORIES
 } from '../lib/layoutPresets';
-import { 
-  CanvasFrameEditorModal, 
-  LayoutTabIcon, 
-  FrameCard 
+import {
+  CanvasFrameEditorModal,
+  LayoutTabIcon,
+  FrameCard
 } from '../components/CanvasFrameEditor';
-import { 
-  fetchCombinedAssets, 
-  uploadReusableAsset, 
-  deleteReusableAsset, 
-  ReusableAsset, 
+import {
+  fetchCombinedAssets,
+  uploadReusableAsset,
+  deleteReusableAsset,
+  ReusableAsset,
   resolveAssetUrl,
   validateAssetUpload,
   checkAssetUsageInTemplates
 } from '../lib/assets';
 import { StickerThumbnail } from '../components/StickerThumbnail';
 import { RemoveBgModal } from '../components/RemoveBgModal';
+import { PhotoFilters } from './PhotoFilters';
+import { Camera } from 'lucide-react';
+import { getDataSourceMode, DataSourceMode } from '../lib/dataSourceConfig';
 
 export const TemplateManagement: React.FC = () => {
   const navigate = useNavigate();
   const { templates, loading, error, refreshTemplates } = useTemplate();
+  const [dataSourceMode, setDataSourceModeState] = useState<DataSourceMode>(getDataSourceMode());
 
-  // Tab Level 1: Frame Templates vs Sticker Library
-  const [activeMainTab, setActiveMainTab] = useState<'frames' | 'stickers'>('frames');
+  useEffect(() => {
+    const handleModeChange = (e: CustomEvent<DataSourceMode>) => {
+      setDataSourceModeState(e.detail);
+    };
+    window.addEventListener('unismiles:datasource-change' as any, handleModeChange);
+    return () => {
+      window.removeEventListener('unismiles:datasource-change' as any, handleModeChange);
+    };
+  }, []);
+
+  // Tab Level 1: Frame Templates vs Sticker Library vs Photo Filters
+  const [activeMainTab, setActiveMainTab] = useState<'frames' | 'stickers' | 'filters'>('frames');
 
   // Active Layout Preset (7 Horizontal Presets: 1x1, 2x1, 3x1, 4x1, 2x2, 2x3, 3x3)
   const [activeLayoutId, setActiveLayoutId] = useState<string>('1x1');
@@ -321,7 +335,7 @@ export const TemplateManagement: React.FC = () => {
         </div>
       </div>
 
-      {/* Level 1 Navigation Tabs: Frame Templates vs Sticker Library */}
+      {/* Level 1 Navigation Tabs: Frame Templates vs Sticker Library vs Photo Filters */}
       <div className="flex gap-6 border-b border-white/10 pb-2">
         <button
           type="button"
@@ -347,6 +361,19 @@ export const TemplateManagement: React.FC = () => {
         >
           <Sparkles className="w-3.5 h-3.5" />
           Sticker Library
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveMainTab('filters')}
+          className={cn(
+            'pb-3 text-xs font-black uppercase tracking-widest border-b-2 transition-all cursor-pointer flex items-center gap-1.5',
+            activeMainTab === 'filters'
+              ? 'border-primary text-primary'
+              : 'border-transparent text-muted hover:text-foreground'
+          )}
+        >
+          <Camera className="w-3.5 h-3.5" />
+          Photo Filters
         </button>
       </div>
 
@@ -720,6 +747,15 @@ export const TemplateManagement: React.FC = () => {
               </div>
             )}
           </div>
+        </div>
+      )}
+
+      {/* ======================================================================== */}
+      {/* TAB 3: PHOTO FILTERS (MODUL 8B INTEGRATION)                              */}
+      {/* ======================================================================== */}
+      {activeMainTab === 'filters' && (
+        <div className="glass-panel rounded-3xl p-6 space-y-6 border border-white/8 bg-[#0B0F19]/90">
+          <PhotoFilters embedded mode={dataSourceMode} />
         </div>
       )}
 
