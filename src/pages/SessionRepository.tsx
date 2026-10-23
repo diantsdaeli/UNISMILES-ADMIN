@@ -46,7 +46,7 @@ import { toast } from 'sonner';
 
 export const SessionRepository: React.FC = () => {
 
-  const { sessions, loading, error, isSimulated, refreshSessions } = useSession();
+  const { sessions, loading, error, isSimulated, dataSourceMode, setDataSourceMode, refreshSessions } = useSession();
   const { kiosks } = useKiosk();
 
   // Filter States
@@ -316,20 +316,36 @@ export const SessionRepository: React.FC = () => {
         </div>
       </header>
 
-      {/* Safe Simulation Banner */}
-      {isSimulated && (
-        <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-4 flex items-start gap-3 shadow-lg">
-          <Shield className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
+      {/* Data Source Mode & Safe Simulation Banner */}
+      <div className={cn(
+        "rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-lg border transition-all",
+        isSimulated ? "bg-amber-500/10 border-amber-500/30" : "bg-blue-500/10 border-blue-500/30"
+      )}>
+        <div className="flex items-start gap-3">
+          <Shield className={cn("w-5 h-5 shrink-0 mt-0.5", isSimulated ? "text-amber-500" : "text-blue-400")} />
           <div className="text-xs space-y-1">
-            <p className="font-extrabold text-amber-500 uppercase tracking-wider flex items-center gap-2">
-              SAFE SIMULATION ACTIVE — Zero Production Mutation
+            <p className={cn("font-extrabold uppercase tracking-wider flex items-center gap-2", isSimulated ? "text-amber-500" : "text-blue-400")}>
+              {isSimulated ? "SAFE SIMULATION ACTIVE — Fixture Terisolasi" : "AUTHORIZED READ-ONLY ACTIVE — Live Backend Sesi"}
             </p>
             <p className="text-foreground/80 leading-relaxed">
-              Sistem saat ini berjalan dalam mode <strong>simulasi terisolasi</strong>. Data sesi, foto, dan transaksi yang disajikan merupakan data sintetis untuk memverifikasi antarmuka dan kontrak backend tanpa memaparkan foto pelanggan riil maupun memicu cetak fisik.
+              {isSimulated
+                ? "Sistem saat ini berjalan dalam mode simulasi terisolasi menggunakan fixture sintetis konsisten tanpa memaparkan foto pelanggan riil maupun memicu cetak fisik."
+                : "Sistem membaca data sesi riil langsung dari backend gateway (GET /admin/sessions) dengan otorisasi JWT dan isolasi multi-tenant."}
             </p>
           </div>
         </div>
-      )}
+        <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
+          <span className="text-[10px] font-black uppercase text-muted tracking-wider">Sumber Data:</span>
+          <select
+            value={dataSourceMode}
+            onChange={(e) => setDataSourceMode(e.target.value as any)}
+            className="bg-black/40 border border-white/10 rounded-xl px-3 py-1.5 text-xs text-foreground font-bold outline-none cursor-pointer hover:border-white/20 transition-all"
+          >
+            <option value="SAFE_SIMULATION">Safe Simulation (Sintetis)</option>
+            <option value="AUTHORIZED_READ_ONLY">Authorized Read-Only (Live GET)</option>
+          </select>
+        </div>
+      </div>
 
       {/* Error State Banner */}
       {error && (

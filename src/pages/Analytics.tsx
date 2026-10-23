@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { 
   BarChart3, 
   TrendingUp, 
@@ -48,6 +48,7 @@ import {
   filterTransactionsByRole, 
   generateTransactionCSV 
 } from '../lib/paymentService';
+import { DataSourceMode, getDataSourceMode, setDataSourceMode as setConfigMode } from '../lib/dataSourceConfig';
 
 export const Analytics: React.FC = () => {
   const { user, isSuperAdmin } = useAuth();
@@ -61,7 +62,9 @@ export const Analytics: React.FC = () => {
   // Transactions State for Financial Intelligence
   const [transactions, setTransactions] = useState<TransactionItem[]>([]);
   const [loadingTx, setLoadingTx] = useState<boolean>(true);
+  const [txError, setTxError] = useState<string | null>(null);
   const [isSimulated, setIsSimulated] = useState<boolean>(true);
+  const [dataSourceMode, setDataSourceModeState] = useState<DataSourceMode>(getDataSourceMode());
 
   // Financial Filters & Pagination
   const [txSearch, setTxSearch] = useState<string>('');
@@ -71,26 +74,63 @@ export const Analytics: React.FC = () => {
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [pageSize, setPageSize] = useState<number>(10);
   const [selectedTx, setSelectedTx] = useState<TransactionItem | null>(null);
+  const activeRequestIdRef = useRef<number>(0);
 
-  // Load Transactions
-  const loadTransactions = async () => {
+  // Load Transactions with explicit mode
+  const loadTransactions = async (modeOverride?: DataSourceMode) => {
+    const activeMode = modeOverride || getDataSourceMode();
+    const requestId = ++activeRequestIdRef.current;
+
     setLoadingTx(true);
+    setTxError(null);
+    if (modeOverride) {
+      setTransactions([]); // Segera bersihkan data lama untuk mencegah kebocoran cache antar mode
+    }
+
     try {
-      const data = await fetchTransactionsService();
+      const data = await fetchTransactionsService({ mode: activeMode });
+      if (requestId !== activeRequestIdRef.current) {
+        return; // Discard respons jika ada request baru yang lebih mutakhir
+      }
       setTransactions(data);
-      const simulated = data.some(t => t.isSimulated);
-      setIsSimulated(simulated || data.length === 0);
+      setIsSimulated(activeMode === 'SAFE_SIMULATION');
     } catch (err: any) {
+      if (requestId !== activeRequestIdRef.current) {
+        return;
+      }
       console.error('[Analytics] Error fetching transactions:', err);
       const status = err?.response?.status || err?.status;
       if (status === 401 || status === 403) {
-        setTransactions([]);
-        setIsSimulated(false);
+        setTxError(`Akses ditolak atau sesi login kedaluwarsa (HTTP ${status}). Silakan login kembali.`);
+      } else {
+        setTxError(err?.message || 'Gagal memuat catatan transaksi dari backend.');
       }
+      setTransactions([]);
+      setIsSimulated(false);
     } finally {
-      setLoadingTx(false);
+      if (requestId === activeRequestIdRef.current) {
+        setLoadingTx(false);
+      }
     }
   };
+
+  const handleModeChange = (newMode: DataSourceMode) => {
+    setConfigMode(newMode);
+    setDataSourceModeState(newMode);
+    loadTransactions(newMode);
+  };
+
+  useEffect(() => {
+    const onModeChange = (e: any) => {
+      const newMode = e.detail as DataSourceMode;
+      if (newMode && newMode !== dataSourceMode) {
+        setDataSourceModeState(newMode);
+        loadTransactions(newMode);
+      }
+    };
+    window.addEventListener('unismiles:datasource-change', onModeChange);
+    return () => window.removeEventListener('unismiles:datasource-change', onModeChange);
+  }, [dataSourceMode]);
 
   useEffect(() => {
     loadTransactions();
@@ -180,8 +220,8 @@ export const Analytics: React.FC = () => {
 
   // Financial RBAC & Filtered Transactions
   const rbacTransactions = useMemo(() => {
-    return filterTransactionsByRole(transactions, user);
-  }, [transactions, user]);
+    return filterTransactionsByRole(transactions, user, kiosks);
+  }, [transactions, user, kiosks]);
 
   const filteredTransactions = useMemo(() => {
     return rbacTransactions.filter(t => {
@@ -268,6 +308,13 @@ export const Analytics: React.FC = () => {
             <AlertCircle className="w-3 h-3" /> Expired
           </span>
         );
+      case 'unknown':
+      case 'unverified':
+        return (
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-slate-500/10 text-slate-400 border border-slate-500/20">
+            <AlertCircle className="w-3 h-3 text-slate-400" /> Unverified
+          </span>
+        );
       default:
         return (
           <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-white/5 text-muted border border-white/10">
@@ -287,25 +334,52 @@ export const Analytics: React.FC = () => {
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500 pb-16">
-      {/* Simulation Banner */}
-      {isSimulated && (
-        <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className="p-2 rounded-xl bg-amber-500/20 text-amber-400">
-              <ShieldAlert className="w-5 h-5" />
-            </div>
-            <div>
-              <p className="text-xs font-black text-amber-300 uppercase tracking-wider">
-                Simulasi Kontrak Finansial Aktif (Modul 6 Safe Engine)
-              </p>
-              <p className="text-[11px] text-amber-200/80 font-medium">
-                Sistem beroperasi dalam mode aman: transaksi mutasi (capture/refund) diblokir fail-closed. Nilai nominal hanya mencatat transaksi terverifikasi.
-              </p>
-            </div>
+      {/* Simulation / Data Source Mode Banner */}
+      <div className={cn(
+        "p-4 rounded-2xl border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 transition-all shadow-lg",
+        isSimulated ? "bg-amber-500/10 border-amber-500/20" : "bg-blue-500/10 border-blue-500/20"
+      )}>
+        <div className="flex items-center gap-3">
+          <div className={cn("p-2 rounded-xl", isSimulated ? "bg-amber-500/20 text-amber-400" : "bg-blue-500/20 text-blue-400")}>
+            <ShieldAlert className="w-5 h-5" />
           </div>
-          <span className="text-[10px] font-black uppercase px-2.5 py-1 rounded-lg bg-amber-500/20 text-amber-300 tracking-widest border border-amber-500/30 whitespace-nowrap">
-            CONTRACT MOCK
-          </span>
+          <div>
+            <p className={cn("text-xs font-black uppercase tracking-wider", isSimulated ? "text-amber-300" : "text-blue-300")}>
+              {isSimulated ? "SAFE SIMULATION ACTIVE — Fixture Finansial Terisolasi" : "AUTHORIZED READ-ONLY ACTIVE — Live Backend Transactions"}
+            </p>
+            <p className="text-[11px] text-foreground/80 font-medium">
+              {isSimulated
+                ? "Sistem beroperasi dalam mode simulasi terisolasi: transaksi mutasi diblokir fail-closed. Nilai nominal hanya mencatat transaksi terverifikasi."
+                : "Sistem membaca rekaman sesi & status transaksi riil langsung dari backend gateway (GET /admin/sessions) dengan otorisasi JWT."}
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
+          <span className="text-[10px] font-black uppercase text-muted tracking-wider">Sumber Data:</span>
+          <select
+            value={dataSourceMode}
+            onChange={(e) => handleModeChange(e.target.value as DataSourceMode)}
+            className="bg-black/40 border border-white/10 rounded-xl px-3 py-1.5 text-xs text-foreground font-bold outline-none cursor-pointer hover:border-white/20 transition-all"
+          >
+            <option value="SAFE_SIMULATION">Safe Simulation (Sintetis)</option>
+            <option value="AUTHORIZED_READ_ONLY">Authorized Read-Only (Live GET)</option>
+          </select>
+        </div>
+      </div>
+
+      {/* Backend Error Banner */}
+      {txError && (
+        <div className="p-4 rounded-2xl bg-red-500/10 border border-red-500/30 flex items-center justify-between gap-3 text-xs text-red-400 shadow-lg">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="w-5 h-5 shrink-0" />
+            <span>{txError}</span>
+          </div>
+          <button
+            onClick={() => loadTransactions(dataSourceMode)}
+            className="px-3 py-1 bg-red-500/20 hover:bg-red-500/30 text-red-300 rounded-lg font-bold transition-colors cursor-pointer shrink-0"
+          >
+            Coba Lagi
+          </button>
         </div>
       )}
 
@@ -550,87 +624,108 @@ export const Analytics: React.FC = () => {
       {activeTab === 'financial' && (
         <div className="space-y-8 animate-in fade-in duration-300">
           {/* Financial KPI Cards */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-            {/* Paid Revenue */}
-            <div className="bg-[#1E293B] border border-white/5 p-6 rounded-3xl relative overflow-hidden shadow-xl hover:border-emerald-500/30 transition-all">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
+            {/* 1. Verified Paid Revenue */}
+            <div className="bg-[#1E293B] border border-white/5 p-5 rounded-3xl relative overflow-hidden shadow-xl hover:border-emerald-500/30 transition-all">
               <div className="flex justify-between items-start">
-                <div className="p-3 bg-emerald-500/10 rounded-2xl text-emerald-400">
-                  <DollarSign className="w-6 h-6" />
+                <div className="p-2.5 bg-emerald-500/10 rounded-2xl text-emerald-400">
+                  <DollarSign className="w-5 h-5" />
                 </div>
-                <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
                   Verified Paid
                 </span>
               </div>
-              <div className="mt-4">
+              <div className="mt-3">
                 <h3 className="text-muted text-[10px] font-black uppercase tracking-widest">Paid Revenue</h3>
-                <p className="text-2xl md:text-3xl font-black mt-1 text-emerald-400">
+                <p className="text-xl md:text-2xl font-black mt-1 text-emerald-400">
                   Rp {financialSummary.paidRevenue.toLocaleString('id-ID')}
                 </p>
                 <p className="text-[10px] text-muted font-bold mt-1">
-                  {financialSummary.successfulPayments} transaksi berhasil
+                  {financialSummary.successfulPayments} transaksi terverifikasi
                 </p>
               </div>
             </div>
 
-            {/* Gross Sales */}
-            <div className="bg-[#1E293B] border border-white/5 p-6 rounded-3xl relative overflow-hidden shadow-xl hover:border-primary/30 transition-all">
+            {/* 2. Gross Session Value */}
+            <div className="bg-[#1E293B] border border-white/5 p-5 rounded-3xl relative overflow-hidden shadow-xl hover:border-primary/30 transition-all">
               <div className="flex justify-between items-start">
-                <div className="p-3 bg-white/5 rounded-2xl text-primary">
-                  <TrendingUp className="w-6 h-6" />
+                <div className="p-2.5 bg-white/5 rounded-2xl text-primary">
+                  <TrendingUp className="w-5 h-5" />
                 </div>
-                <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-white/5 text-muted border border-white/10">
-                  Gross Volume
+                <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-full bg-white/5 text-muted border border-white/10">
+                  Gross Value
                 </span>
               </div>
-              <div className="mt-4">
-                <h3 className="text-muted text-[10px] font-black uppercase tracking-widest">Gross Sales</h3>
-                <p className="text-2xl md:text-3xl font-black mt-1 text-foreground">
+              <div className="mt-3">
+                <h3 className="text-muted text-[10px] font-black uppercase tracking-widest">Gross Session Value</h3>
+                <p className="text-xl md:text-2xl font-black mt-1 text-foreground">
                   Rp {financialSummary.grossTransactionAmount.toLocaleString('id-ID')}
                 </p>
                 <p className="text-[10px] text-muted font-bold mt-1">
-                  Total {financialSummary.totalTransactions} rekaman transaksi
+                  Total {financialSummary.totalTransactions} rekaman sesi
                 </p>
               </div>
             </div>
 
-            {/* Pending Volume */}
-            <div className="bg-[#1E293B] border border-white/5 p-6 rounded-3xl relative overflow-hidden shadow-xl hover:border-amber-500/30 transition-all">
+            {/* 3. Explicit Pending Volume */}
+            <div className="bg-[#1E293B] border border-white/5 p-5 rounded-3xl relative overflow-hidden shadow-xl hover:border-amber-500/30 transition-all">
               <div className="flex justify-between items-start">
-                <div className="p-3 bg-amber-500/10 rounded-2xl text-amber-400">
-                  <Clock className="w-6 h-6" />
+                <div className="p-2.5 bg-amber-500/10 rounded-2xl text-amber-400">
+                  <Clock className="w-5 h-5" />
                 </div>
-                <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20">
                   Pending
                 </span>
               </div>
-              <div className="mt-4">
+              <div className="mt-3">
                 <h3 className="text-muted text-[10px] font-black uppercase tracking-widest">Pending Volume</h3>
-                <p className="text-2xl md:text-3xl font-black mt-1 text-amber-400">
+                <p className="text-xl md:text-2xl font-black mt-1 text-amber-400">
                   Rp {financialSummary.pendingVolume.toLocaleString('id-ID')}
                 </p>
                 <p className="text-[10px] text-muted font-bold mt-1">
-                  {financialSummary.pendingPayments} menunggu bukti pembayaran
+                  {financialSummary.pendingPayments} menunggu bukti bayar
                 </p>
               </div>
             </div>
 
-            {/* Failed & Expired */}
-            <div className="bg-[#1E293B] border border-white/5 p-6 rounded-3xl relative overflow-hidden shadow-xl hover:border-red-500/30 transition-all">
+            {/* 4. Failed / Expired Volume */}
+            <div className="bg-[#1E293B] border border-white/5 p-5 rounded-3xl relative overflow-hidden shadow-xl hover:border-red-500/30 transition-all">
               <div className="flex justify-between items-start">
-                <div className="p-3 bg-red-500/10 rounded-2xl text-red-400">
-                  <XCircle className="w-6 h-6" />
+                <div className="p-2.5 bg-red-500/10 rounded-2xl text-red-400">
+                  <XCircle className="w-5 h-5" />
                 </div>
-                <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-red-500/10 text-red-400 border border-red-500/20">
+                <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-full bg-red-500/10 text-red-400 border border-red-500/20">
                   Unsettled
                 </span>
               </div>
-              <div className="mt-4">
+              <div className="mt-3">
                 <h3 className="text-muted text-[10px] font-black uppercase tracking-widest">Failed / Expired</h3>
-                <p className="text-2xl md:text-3xl font-black mt-1 text-red-400">
+                <p className="text-xl md:text-2xl font-black mt-1 text-red-400">
                   Rp {financialSummary.failedVolume.toLocaleString('id-ID')}
                 </p>
                 <p className="text-[10px] text-muted font-bold mt-1">
-                  {financialSummary.failedPayments + financialSummary.expiredPayments} transaksi tidak terselesaikan
+                  {financialSummary.failedPayments + financialSummary.expiredPayments} transaksi gagal/kedaluwarsa
+                </p>
+              </div>
+            </div>
+
+            {/* 5. Unverified Volume */}
+            <div className="bg-[#1E293B] border border-white/5 p-5 rounded-3xl relative overflow-hidden shadow-xl hover:border-slate-500/30 transition-all">
+              <div className="flex justify-between items-start">
+                <div className="p-2.5 bg-slate-500/10 rounded-2xl text-slate-400">
+                  <AlertCircle className="w-5 h-5" />
+                </div>
+                <span className="text-[9px] font-black uppercase px-2 py-0.5 rounded-full bg-slate-500/10 text-slate-400 border border-slate-500/20">
+                  Unverified
+                </span>
+              </div>
+              <div className="mt-3">
+                <h3 className="text-muted text-[10px] font-black uppercase tracking-widest">Unverified Volume</h3>
+                <p className="text-xl md:text-2xl font-black mt-1 text-slate-300">
+                  Rp {financialSummary.unverifiedVolume.toLocaleString('id-ID')}
+                </p>
+                <p className="text-[10px] text-muted font-bold mt-1">
+                  {financialSummary.unverifiedPayments} sesi tanpa status pembayaran
                 </p>
               </div>
             </div>
@@ -724,15 +819,15 @@ export const Analytics: React.FC = () => {
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-white/5">
               <div>
                 <h3 className="text-base font-black uppercase tracking-tight text-foreground flex items-center gap-2">
-                  <Receipt className="w-4 h-4 text-primary" /> Riwayat Transaksi Finansial
+                  <Receipt className="w-4 h-4 text-primary" /> Catatan Sesi & Status Pembayaran
                 </h3>
                 <p className="text-xs text-muted font-bold mt-0.5">
-                  Menampilkan {filteredTransactions.length} rekaman transaksi terisolasi
+                  Menampilkan {filteredTransactions.length} rekaman catatan sesi & status pembayaran terisolasi
                 </p>
               </div>
               <div className="flex items-center gap-3">
                 <button
-                  onClick={loadTransactions}
+                  onClick={() => loadTransactions()}
                   className="px-3.5 py-2 glass-panel rounded-xl hover:bg-white/5 text-xs font-bold text-foreground flex items-center gap-1.5 cursor-pointer"
                   title="Refresh Transaksi"
                 >
@@ -771,6 +866,7 @@ export const Analytics: React.FC = () => {
                   <option value="pending">Pending</option>
                   <option value="failed">Failed</option>
                   <option value="expired">Expired</option>
+                  <option value="unknown">Unverified (Status Belum Tersedia)</option>
                 </select>
               </div>
 
@@ -904,7 +1000,7 @@ export const Analytics: React.FC = () => {
 
               <div>
                 <span className="text-[10px] font-black text-primary border border-primary/20 bg-primary/5 px-2.5 py-0.5 rounded-full uppercase tracking-widest">
-                  Detail Transaksi Finansial
+                  Detail Catatan Sesi & Status Pembayaran
                 </span>
                 <h3 className="text-2xl font-black tracking-tighter uppercase mt-2 text-foreground font-mono">
                   {selectedTx.transaction_code}

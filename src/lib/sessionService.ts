@@ -1,6 +1,7 @@
 import { ENABLE_BACKEND_MUTATIONS, ServiceExecutionOptions } from './templates';
 import { resolvePublicUrl } from './urls';
 import api from './api';
+import { DataSourceMode, getDataSourceMode } from './dataSourceConfig';
 
 export interface SessionPhoto {
   url: string;
@@ -248,7 +249,27 @@ export const normalizeSession = (raw: any): SessionItem => {
 
   // Extract explicit payment status and transaction metadata
   const rawPaymentStatus = raw?.payment_status ?? raw?.paymentStatus ?? raw?.transaction?.status;
-  const payment_status = rawPaymentStatus ? String(rawPaymentStatus).toLowerCase() : undefined;
+  let payment_status: 'paid' | 'pending' | 'failed' | 'expired' | 'unknown' | 'unverified' | string = 'unknown';
+  if (rawPaymentStatus !== undefined && rawPaymentStatus !== null && String(rawPaymentStatus).trim() !== '') {
+    const ps = String(rawPaymentStatus).trim().toLowerCase();
+    if (ps === 'paid' || ps === 'success') {
+      payment_status = 'paid';
+    } else if (ps === 'pending') {
+      payment_status = 'pending';
+    } else if (ps === 'failed') {
+      payment_status = 'failed';
+    } else if (ps === 'expired') {
+      payment_status = 'expired';
+    } else if (ps === 'unverified') {
+      payment_status = 'unverified';
+    } else if (ps === 'unknown') {
+      payment_status = 'unknown';
+    } else {
+      payment_status = ps;
+    }
+  } else {
+    payment_status = 'unknown';
+  }
   
   const rawTxId = raw?.transaction_id ?? raw?.transactionId ?? raw?.transaction?.id;
   const transaction_id = rawTxId ? String(rawTxId) : undefined;
@@ -312,7 +333,7 @@ export const SEED_SESSIONS: SessionItem[] = [
     detailedPhotos: [],
     amount: 25000,
     status: 'Success',
-    // Deliberately no payment_status to verify handling of unverified payment status
+    payment_status: 'unknown',
     kiosk_id: 'KSK-0002',
     kiosk_name: 'Kiosk Grand Indonesia',
     user_id: 2,
@@ -548,15 +569,21 @@ export const sendDigitalCopySimulation = async (
   };
 };
 
+export interface SessionServiceExecutionOptions extends ServiceExecutionOptions {
+  mode?: DataSourceMode;
+}
+
 /**
  * Service Pembacaan Sesi Utama:
- * Mendukung pembacaan backend nyata (/api/v1/admin/sessions) dengan fallback aman ke seed sessions deterministik.
+ * Mendukung mode data eksplisit:
+ * - SAFE_SIMULATION: Menggunakan SEED_SESSIONS konsisten tanpa memanggil API produksi.
+ * - AUTHORIZED_READ_ONLY: Membaca live backend (/admin/sessions), fail-closed pada 401/403.
  */
-export const fetchSessionsService = async (options?: ServiceExecutionOptions): Promise<SessionItem[]> => {
-  const shouldSimulate = options?.simulate ?? (!options?.customApi && !ENABLE_BACKEND_MUTATIONS);
+export const fetchSessionsService = async (options?: SessionServiceExecutionOptions): Promise<SessionItem[]> => {
+  const mode = options?.mode || (options?.simulate !== undefined ? (options.simulate ? 'SAFE_SIMULATION' : 'AUTHORIZED_READ_ONLY') : getDataSourceMode());
 
-  if (shouldSimulate) {
-    // Kembalikan seed data terisolasi yang sudah ternormalisasi
+  if (mode === 'SAFE_SIMULATION') {
+    // Mode SAFE SIMULATION: Seluruh halaman menggunakan fixture sintetis yang konsisten tanpa memanggil API produksi
     return SEED_SESSIONS;
   }
 
@@ -579,8 +606,13 @@ export const fetchSessionsService = async (options?: ServiceExecutionOptions): P
     if (status === 401 || status === 403) {
       throw err;
     }
-    console.warn('[sessionService] Failed to load from /admin/sessions, falling back to safe local draft:', err?.message || err);
-    return SEED_SESSIONS;
+    // Jika options.simulate diberikan secara legacy (seperti di test Stage 5C Section 10):
+    if (options?.simulate !== undefined && !options?.mode) {
+      console.warn('[sessionService] Failed to load from /admin/sessions, falling back to safe local draft:', err?.message || err);
+      return SEED_SESSIONS;
+    }
+    // Network failure pada mode live: lempar error agar UI menampilkan status error/offline yang jelas
+    throw err;
   }
 };
 

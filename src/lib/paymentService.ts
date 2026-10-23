@@ -12,11 +12,46 @@
  */
 
 import api from './api';
+import { DataSourceMode, getDataSourceMode } from './dataSourceConfig';
 
 export const ENABLE_BACKEND_MUTATIONS = false;
 export const VERIFIED_STAGING_ALLOWLIST: string[] = [];
 
-export type TransactionStatus = 'pending' | 'paid' | 'failed' | 'expired' | 'cancelled' | 'refunded';
+export type TransactionStatus = 'pending' | 'paid' | 'failed' | 'expired' | 'cancelled' | 'refunded' | 'unknown' | 'unverified';
+
+/**
+ * Normalisasi status pembayaran secara ketat:
+ * - Missing/null/undefined/kosong -> 'unknown' (BUKAN 'pending'!)
+ * - 'pending' -> 'pending' (hanya jika eksplisit)
+ * - 'paid' / 'success' -> 'paid'
+ * - 'failed' -> 'failed'
+ * - 'expired' -> 'expired'
+ */
+export function normalizePaymentStatus(rawStatus: unknown): TransactionStatus {
+  if (rawStatus === undefined || rawStatus === null || String(rawStatus).trim() === '') {
+    return 'unknown';
+  }
+  const s = String(rawStatus).trim().toLowerCase();
+  if (s === 'paid' || s === 'success') {
+    return 'paid';
+  }
+  if (s === 'pending') {
+    return 'pending';
+  }
+  if (s === 'failed') {
+    return 'failed';
+  }
+  if (s === 'expired') {
+    return 'expired';
+  }
+  if (s === 'unverified') {
+    return 'unverified';
+  }
+  if (s === 'unknown') {
+    return 'unknown';
+  }
+  return 'unknown';
+}
 
 export interface TransactionItem {
   id: string;
@@ -105,10 +140,12 @@ export interface FinancialSummary {
   failedPayments: number;
   pendingPayments: number;
   expiredPayments: number;
-  grossTransactionAmount: number; // Nilai kotor seluruh sesi/transaksi
-  paidRevenue: number;           // Pendapatan riil dari transaksi sukses/paid
-  pendingVolume: number;         // Nominal pending yang belum terverifikasi
+  unverifiedPayments: number;     // Transaksi dengan status unknown/unverified
+  grossTransactionAmount: number; // Nilai kotor seluruh sesi/transaksi (Gross Session Value)
+  paidRevenue: number;           // Pendapatan riil dari transaksi sukses/paid (Verified Paid Revenue)
+  pendingVolume: number;         // Nominal pending yang eksplisit
   failedVolume: number;          // Nominal transaksi gagal/kedaluwarsa
+  unverifiedVolume: number;      // Nominal sesi tanpa status pembayaran (Unverified Volume)
   settlementRevenue: number;     // Status settlement gateway (0 jika unsupported)
   refundVolume: number;          // Pengembalian dana (0 jika unsupported)
   netRevenue: number;            // paidRevenue - refundVolume
@@ -117,124 +154,181 @@ export interface FinancialSummary {
 }
 
 // Synthetic seed transactions for safe simulation and contract validation
+// Synthetic seed transactions for safe simulation and contract validation
+// Aligned 1-to-1 with SEED_SESSIONS for complete consistency between Sessions and Financial Intelligence
 export const SEED_TRANSACTIONS: TransactionItem[] = [
   {
-    id: 'TRX-9821',
+    id: 'TRX-8821',
     transaction_code: 'US-TRX-20260330-001',
-    session_id: 'US-9821',
-    session_code: 'US-9821',
-    kiosk_id: 'kiosk-01',
-    kiosk_name: 'Kiosk Central Park Lt. 2',
+    session_id: '8821',
+    session_code: '8821',
+    kiosk_id: 'KSK-0001',
+    kiosk_name: 'Kiosk Central Park Mall',
     partner_id: 'mitra-cp',
     partner_name: 'Mitra Central Park',
-    amount: 50000,
+    amount: 35000,
     payment_method: 'qris',
     status: 'paid',
     verification_method: 'qris_visual_proof',
     provider_detected: 'BCA Mobile',
-    paid_at: '2026-03-30T14:20:15Z',
-    verified_at: '2026-03-30T14:20:20Z',
-    created_at: '2026-03-30T14:18:00Z',
+    paid_at: '2026-10-22T10:15:20.000Z',
+    verified_at: '2026-10-22T10:15:25.000Z',
+    created_at: '2026-10-22T10:15:00.000Z',
     isSimulated: true,
-    is_simulated_reference: true
+    is_simulated_reference: false
   },
   {
-    id: 'TRX-9820',
-    transaction_code: 'US-TRX-20260330-002',
-    session_id: 'US-9820',
-    session_code: 'US-9820',
-    kiosk_id: 'kiosk-01',
-    kiosk_name: 'Kiosk Central Park Lt. 2',
-    partner_id: 'mitra-cp',
-    partner_name: 'Mitra Central Park',
-    amount: 75000,
-    payment_method: 'duitku',
-    status: 'paid',
-    verification_method: 'duitku_callback',
-    provider_detected: 'ShopeePay QRIS',
-    paid_at: '2026-03-30T14:15:30Z',
-    verified_at: '2026-03-30T14:15:35Z',
-    created_at: '2026-03-30T14:12:00Z',
-    isSimulated: true,
-    is_simulated_reference: true
-  },
-  {
-    id: 'TRX-9819',
-    transaction_code: 'US-TRX-20260330-003',
-    session_id: 'US-9819',
-    session_code: 'US-9819',
-    kiosk_id: 'kiosk-02',
-    kiosk_name: 'Kiosk Mall Kelapa Gading 3',
-    partner_id: 'mitra-mkg',
-    partner_name: 'Mitra MKG',
-    amount: 50000,
-    payment_method: 'gopay',
-    status: 'paid',
-    verification_method: 'gopay_merchant_poll',
-    provider_detected: 'GoPay',
-    paid_at: '2026-03-30T13:51:10Z',
-    verified_at: '2026-03-30T13:51:12Z',
-    created_at: '2026-03-30T13:48:00Z',
-    isSimulated: true,
-    is_simulated_reference: true
-  },
-  {
-    id: 'TRX-9818',
-    transaction_code: 'US-TRX-20260330-004',
-    session_id: 'US-9818',
-    session_code: 'US-9818',
-    kiosk_id: 'kiosk-02',
-    kiosk_name: 'Kiosk Mall Kelapa Gading 3',
-    partner_id: 'mitra-mkg',
-    partner_name: 'Mitra MKG',
-    amount: 100000,
-    payment_method: 'qris',
-    status: 'pending',
-    verification_method: 'qris_visual_proof',
-    created_at: '2026-03-30T13:45:00Z',
-    isSimulated: true,
-    is_simulated_reference: true
-  },
-  {
-    id: 'TRX-9817',
-    transaction_code: 'US-TRX-20260330-005',
-    session_id: 'US-9817',
-    session_code: 'US-9817',
-    kiosk_id: 'kiosk-03',
-    kiosk_name: 'Kiosk Grand Indonesia West Mall',
+    id: 'TRX-8822',
+    transaction_code: 'US-TRX-8822',
+    session_id: '8822',
+    session_code: '8822',
+    kiosk_id: 'KSK-0002',
+    kiosk_name: 'Kiosk Grand Indonesia',
     partner_id: 'mitra-gi',
     partner_name: 'Mitra Grand Indonesia',
-    amount: 45000,
+    amount: 25000,
+    payment_method: 'qris',
+    status: 'unknown',
+    verification_method: 'unverified',
+    created_at: '2026-10-22T11:20:00.000Z',
+    isSimulated: true,
+    is_simulated_reference: true
+  },
+  {
+    id: 'TRX-8823',
+    transaction_code: 'US-TRX-8823',
+    session_id: '8823',
+    session_code: '8823',
+    kiosk_id: 'KSK-0001',
+    kiosk_name: 'Kiosk Central Park Mall',
+    partner_id: 'mitra-cp',
+    partner_name: 'Mitra Central Park',
+    amount: 35000,
     payment_method: 'qris',
     status: 'failed',
     verification_method: 'qris_visual_proof',
     provider_detected: 'UNKNOWN',
     failure_reason_code: 'AMOUNT_MISMATCH',
-    created_at: '2026-03-30T12:30:00Z',
+    created_at: '2026-10-22T13:45:00.000Z',
     isSimulated: true,
     is_simulated_reference: true
   },
   {
-    id: 'TRX-9816',
-    transaction_code: 'US-TRX-20260330-006',
-    session_id: 'US-9816',
-    session_code: 'US-9816',
-    kiosk_id: 'kiosk-03',
-    kiosk_name: 'Kiosk Grand Indonesia West Mall',
+    id: 'TRX-8824',
+    transaction_code: 'US-TRX-20260330-002',
+    session_id: '8824',
+    session_code: '8824',
+    kiosk_id: 'KSK-0003',
+    kiosk_name: 'Kiosk Senayan City',
+    partner_id: 'mitra-sc',
+    partner_name: 'Mitra Senayan City',
+    amount: 35000,
+    payment_method: 'qris',
+    status: 'paid',
+    verification_method: 'qris_visual_proof',
+    provider_detected: 'Mandiri Livin',
+    paid_at: '2026-10-22T15:10:20.000Z',
+    verified_at: '2026-10-22T15:10:25.000Z',
+    created_at: '2026-10-22T15:10:00.000Z',
+    isSimulated: true,
+    is_simulated_reference: false
+  },
+  {
+    id: 'TRX-8825',
+    transaction_code: 'US-TRX-8825',
+    session_id: '8825',
+    session_code: '8825',
+    kiosk_id: 'KSK-0002',
+    kiosk_name: 'Kiosk Grand Indonesia',
     partner_id: 'mitra-gi',
     partner_name: 'Mitra Grand Indonesia',
-    amount: 45000,
+    amount: 25000,
     payment_method: 'qris',
-    status: 'expired',
-    verification_method: 'timeout',
-    failure_reason_code: 'EXPIRED_SESSION',
-    created_at: '2026-03-30T11:15:00Z',
+    status: 'pending',
+    verification_method: 'qris_visual_proof',
+    created_at: '2026-10-22T16:30:00.000Z',
     isSimulated: true,
     is_simulated_reference: true
   }
 ];
 
 export const SEED_VERIFICATION_ATTEMPTS: Record<string, PaymentVerificationAttempt[]> = {
+  '8821': [
+    {
+      id: 'att-8821-01',
+      session_id: '8821',
+      kiosk_id: 'KSK-0001',
+      attempt_number: 1,
+      status: 'verified',
+      decision: 'verified',
+      expected_amount: 35000,
+      extracted_amount: 35000,
+      provider_detected: 'BCA Mobile',
+      screen_type: 'mobile_screenshot',
+      ocr_confidence: 0.98,
+      quality_score: 0.95,
+      reason_codes: ['EXACT_AMOUNT_MATCH', 'VALID_MERCHANT_MATCH'],
+      created_at: '2026-10-22T10:15:20.000Z',
+      isSimulated: true
+    }
+  ],
+  'US-8821': [
+    {
+      id: 'att-8821-01',
+      session_id: 'US-8821',
+      kiosk_id: 'KSK-0001',
+      attempt_number: 1,
+      status: 'verified',
+      decision: 'verified',
+      expected_amount: 35000,
+      extracted_amount: 35000,
+      provider_detected: 'BCA Mobile',
+      screen_type: 'mobile_screenshot',
+      ocr_confidence: 0.98,
+      quality_score: 0.95,
+      reason_codes: ['EXACT_AMOUNT_MATCH', 'VALID_MERCHANT_MATCH'],
+      created_at: '2026-10-22T10:15:20.000Z',
+      isSimulated: true
+    }
+  ],
+  '8823': [
+    {
+      id: 'att-8823-01',
+      session_id: '8823',
+      kiosk_id: 'KSK-0001',
+      attempt_number: 1,
+      status: 'failed',
+      decision: 'rejected',
+      expected_amount: 35000,
+      extracted_amount: 20000,
+      provider_detected: 'OVO',
+      screen_type: 'mobile_camera',
+      ocr_confidence: 0.89,
+      quality_score: 0.91,
+      reason_codes: ['AMOUNT_MISMATCH', 'UNDERPAYMENT_DETECTED'],
+      created_at: '2026-10-22T13:45:15.000Z',
+      isSimulated: true
+    }
+  ],
+  'US-8823': [
+    {
+      id: 'att-8823-01',
+      session_id: 'US-8823',
+      kiosk_id: 'KSK-0001',
+      attempt_number: 1,
+      status: 'failed',
+      decision: 'rejected',
+      expected_amount: 35000,
+      extracted_amount: 20000,
+      provider_detected: 'OVO',
+      screen_type: 'mobile_camera',
+      ocr_confidence: 0.89,
+      quality_score: 0.91,
+      reason_codes: ['AMOUNT_MISMATCH', 'UNDERPAYMENT_DETECTED'],
+      created_at: '2026-10-22T13:45:15.000Z',
+      isSimulated: true
+    }
+  ],
   'US-9821': [
     {
       id: 'att-9821-01',
@@ -251,25 +345,6 @@ export const SEED_VERIFICATION_ATTEMPTS: Record<string, PaymentVerificationAttem
       quality_score: 0.95,
       reason_codes: ['EXACT_AMOUNT_MATCH', 'VALID_MERCHANT_MATCH'],
       created_at: '2026-03-30T14:20:18Z',
-      isSimulated: true
-    }
-  ],
-  'US-9817': [
-    {
-      id: 'att-9817-01',
-      session_id: 'US-9817',
-      kiosk_id: 'kiosk-03',
-      attempt_number: 1,
-      status: 'failed',
-      decision: 'rejected',
-      expected_amount: 45000,
-      extracted_amount: 25000,
-      provider_detected: 'OVO',
-      screen_type: 'mobile_camera',
-      ocr_confidence: 0.89,
-      quality_score: 0.91,
-      reason_codes: ['AMOUNT_MISMATCH', 'UNDERPAYMENT_DETECTED'],
-      created_at: '2026-03-30T12:30:15Z',
       isSimulated: true
     }
   ]
@@ -361,10 +436,12 @@ export function calculateFinancialSummary(transactions: TransactionItem[]): Fina
   let failedPayments = 0;
   let pendingPayments = 0;
   let expiredPayments = 0;
+  let unverifiedPayments = 0;
   let grossTransactionAmount = 0;
   let paidRevenue = 0;
   let pendingVolume = 0;
   let failedVolume = 0;
+  let unverifiedVolume = 0;
 
   const revenuePerKiosk: Record<string, KioskRevenueBreakdown> = {};
   const revenuePerPartner: Record<string, PartnerRevenueBreakdown> = {};
@@ -378,6 +455,7 @@ export function calculateFinancialSummary(transactions: TransactionItem[]): Fina
     const isPending = t.status === 'pending';
     const isFailed = t.status === 'failed';
     const isExpired = t.status === 'expired';
+    const isUnverified = t.status === 'unknown' || t.status === 'unverified' || (!isPaid && !isPending && !isFailed && !isExpired);
 
     if (isPaid) {
       successfulPayments += 1;
@@ -391,6 +469,9 @@ export function calculateFinancialSummary(transactions: TransactionItem[]): Fina
     } else if (isExpired) {
       expiredPayments += 1;
       failedVolume += amount;
+    } else if (isUnverified) {
+      unverifiedPayments += 1;
+      unverifiedVolume += amount;
     }
 
     // Breakdown per Kiosk
@@ -452,10 +533,12 @@ export function calculateFinancialSummary(transactions: TransactionItem[]): Fina
     failedPayments,
     pendingPayments,
     expiredPayments,
+    unverifiedPayments,
     grossTransactionAmount,
     paidRevenue,
     pendingVolume,
     failedVolume,
+    unverifiedVolume,
     settlementRevenue,
     refundVolume,
     netRevenue,
@@ -469,7 +552,11 @@ export function calculateFinancialSummary(transactions: TransactionItem[]): Fina
  * - Super Admin sees all transactions.
  * - Admin Mitra only sees transactions belonging to their kiosk or partner account.
  */
-export function filterTransactionsByRole(transactions: TransactionItem[], user: any): TransactionItem[] {
+export function filterTransactionsByRole(
+  transactions: TransactionItem[],
+  user: any,
+  userKiosks?: { id: string; user_id?: string | number }[]
+): TransactionItem[] {
   if (!user) return [];
 
   const isSuperAdmin = user.role === 'Super Admin' || user.role === 'admin' || user.isSuperAdmin === true;
@@ -478,14 +565,21 @@ export function filterTransactionsByRole(transactions: TransactionItem[], user: 
   }
 
   const partnerId = user.partner_id || user.partnerId || user.partner_name || user.id;
-  const userKiosks: string[] = Array.isArray(user.kiosks)
+  const directKiosks: string[] = Array.isArray(user.kiosks)
     ? user.kiosks.map((k: any) => (typeof k === 'string' ? k : k.id))
     : [];
+
+  const allowedKioskIds = new Set([
+    ...directKiosks,
+    ...(userKiosks || [])
+      .filter(k => String(k.user_id) === String(user.id))
+      .map(k => k.id)
+  ]);
 
   return transactions.filter(t => {
     if (t.partner_id && String(t.partner_id) === String(partnerId)) return true;
     if (t.partner_name && String(t.partner_name) === String(user.partner_name)) return true;
-    if (userKiosks.includes(t.kiosk_id)) return true;
+    if (allowedKioskIds.has(t.kiosk_id)) return true;
     return false;
   });
 }
@@ -506,7 +600,15 @@ export function redactSensitiveData(raw: string): string {
  * Resolves against backend sessions or simulation fixtures.
  * Throws on HTTP 401/403 to prevent unauthenticated data exposure.
  */
-export async function fetchTransactionsService(): Promise<TransactionItem[]> {
+export async function fetchTransactionsService(options?: { mode?: DataSourceMode }): Promise<TransactionItem[]> {
+  const mode = options?.mode || getDataSourceMode();
+
+  if (mode === 'SAFE_SIMULATION') {
+    // Mode SAFE SIMULATION: Seluruh halaman menggunakan fixture sintetis yang konsisten tanpa memanggil API produksi
+    return SEED_TRANSACTIONS;
+  }
+
+  // Mode AUTHORIZED_READ_ONLY: Pembacaan GET backend yang diizinkan
   try {
     // Attempt to query transactions endpoint if backend implements it
     const res = await api.get('/admin/transactions');
@@ -522,14 +624,15 @@ export async function fetchTransactionsService(): Promise<TransactionItem[]> {
         partner_name: raw.partner_name,
         amount: Math.round(Number(raw.amount) || 0),
         payment_method: raw.payment_method || 'qris',
-        status: (raw.status === 'success' ? 'paid' : raw.status) || 'pending',
+        status: normalizePaymentStatus(raw.status),
         verification_method: raw.verification_method,
         provider_detected: raw.provider_detected,
         paid_at: raw.paid_at,
         verified_at: raw.verified_at,
         created_at: raw.created_at || new Date().toISOString(),
         failure_reason_code: raw.failure_reason_code,
-        isSimulated: false
+        isSimulated: false,
+        is_simulated_reference: false
       }));
     }
   } catch (err: any) {
@@ -539,10 +642,10 @@ export async function fetchTransactionsService(): Promise<TransactionItem[]> {
       throw err;
     }
     // Expected: backend currently lacks dedicated GET /admin/transactions.
-    // We fall back safely to synthesis from sessions or contract seed fixtures.
+    // Lanjut ke pembacaan dari /admin/sessions.
   }
 
-  // Try deriving transactions from /admin/sessions
+  // Try deriving transactions from /admin/sessions (Authorized Read-Only)
   try {
     const sessionRes = await api.get('/admin/sessions');
     if (sessionRes.data?.success && Array.isArray(sessionRes.data?.data)) {
@@ -553,20 +656,10 @@ export async function fetchTransactionsService(): Promise<TransactionItem[]> {
         const txCode = realTxCode || `US-TRX-${cleanId || idx + 1}`;
 
         // Critical: Do NOT assume session Success/completed means verified paid.
-        // Use actual payment_status if available. If none, set pending / unverified.
-        const rawPaymentStatus = s.payment_status ? String(s.payment_status).toLowerCase() : undefined;
-        let status: TransactionStatus = 'pending';
-        if (rawPaymentStatus === 'paid' || rawPaymentStatus === 'success') {
-          status = 'paid';
-        } else if (rawPaymentStatus === 'failed') {
-          status = 'failed';
-        } else if (rawPaymentStatus === 'expired') {
-          status = 'expired';
-        } else {
-          status = 'pending';
-        }
-
+        // Use actual payment_status if available. If none, set unknown (NEVER PENDING!).
+        const status = normalizePaymentStatus(s.payment_status);
         const isPaid = status === 'paid';
+
         return {
           id: realTxCode ? `TRX-${realTxCode}` : `TRX-${cleanId || idx + 1}`,
           transaction_code: txCode,
@@ -576,7 +669,7 @@ export async function fetchTransactionsService(): Promise<TransactionItem[]> {
           kiosk_name: s.kiosk_name || 'UniSmiles Kiosk',
           partner_id: s.partner_id,
           partner_name: s.partner_name,
-          amount: Math.round(Number(s.amount) || 35000),
+          amount: Math.round(Number(s.amount) || 0),
           payment_method: s.payment_method || 'qris',
           status,
           verification_method: 'qris_visual_proof',
@@ -584,23 +677,21 @@ export async function fetchTransactionsService(): Promise<TransactionItem[]> {
           paid_at: isPaid ? (s.paid_at || s.timestamp) : null,
           verified_at: isPaid ? (s.verified_at || s.timestamp) : null,
           created_at: s.timestamp || new Date().toISOString(),
-          isSimulated: true,
+          isSimulated: false, // Live data from backend
           is_simulated_reference: !hasRealTx
         };
       });
-      if (derived.length > 0) {
-        return derived;
-      }
+      return derived;
     }
+    return [];
   } catch (err: any) {
     const status = err?.response?.status || err?.status;
     if (status === 401 || status === 403) {
       throw err;
     }
+    // Network failure pada mode live: lempar error, jangan diam-diam menyajikan mock!
+    throw err;
   }
-
-  // Return synthetic simulation fixtures with explicit isSimulated flag
-  return SEED_TRANSACTIONS;
 }
 
 /**

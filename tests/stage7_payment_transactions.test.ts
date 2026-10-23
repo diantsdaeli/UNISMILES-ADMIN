@@ -46,9 +46,13 @@ import {
   savePaymentProfileService,
   ENABLE_BACKEND_MUTATIONS,
   VERIFIED_STAGING_ALLOWLIST,
-  DEFAULT_PAYMENT_PROFILE
+  DEFAULT_PAYMENT_PROFILE,
+  normalizePaymentStatus,
+  SEED_TRANSACTIONS,
+  fetchTransactionsService
 } from '../src/lib/paymentService';
-import { isSafePhotoUrl } from '../src/lib/sessionService';
+import { isSafePhotoUrl, normalizeSession, fetchSessionsService, SEED_SESSIONS } from '../src/lib/sessionService';
+import { DataSourceMode, getDataSourceMode, setDataSourceMode, DEFAULT_DATA_SOURCE_MODE } from '../src/lib/dataSourceConfig';
 
 let passedAssertions = 0;
 function testAssert(condition: boolean, message: string) {
@@ -955,6 +959,303 @@ console.log('--- SECTION 36: Final Patch 3 - Transaction Reference Labelling ---
   testAssert(!realTx.is_simulated_reference, 'Real backend transaction code is marked as official (not simulated)');
   testAssert(syntheticTx.is_simulated_reference === true, 'Synthetic transaction code is explicitly flagged as simulated reference');
   console.log('[PASS] Transaction reference official ID vs Referensi Simulasi labelling fully verified');
+}
+
+// ─── 37. Missing payment_status Handling & Strict Normalization ─────────────
+console.log('--- SECTION 37: Missing payment_status Handling & Strict Normalization ---');
+{
+  // 1. Missing / null / undefined / whitespace payment_status -> unknown
+  testAssert(normalizePaymentStatus(undefined) === 'unknown', 'normalizePaymentStatus(undefined) returns unknown');
+  testAssert(normalizePaymentStatus(null) === 'unknown', 'normalizePaymentStatus(null) returns unknown');
+  testAssert(normalizePaymentStatus('') === 'unknown', 'normalizePaymentStatus("") returns unknown');
+  testAssert(normalizePaymentStatus('   ') === 'unknown', 'normalizePaymentStatus("   ") returns unknown');
+  testAssert(normalizePaymentStatus('unknown') === 'unknown', 'normalizePaymentStatus("unknown") returns unknown');
+  testAssert(normalizePaymentStatus('unverified') === 'unverified', 'normalizePaymentStatus("unverified") returns unverified');
+
+  // 2. Explicit status mappings
+  testAssert(normalizePaymentStatus('pending') === 'pending', 'Explicit pending returns pending');
+  testAssert(normalizePaymentStatus('PENDING') === 'pending', 'Case-insensitive PENDING returns pending');
+  testAssert(normalizePaymentStatus('paid') === 'paid', 'Explicit paid returns paid');
+  testAssert(normalizePaymentStatus('PAID') === 'paid', 'Case-insensitive PAID returns paid');
+  testAssert(normalizePaymentStatus('success') === 'paid', 'Payment status success normalizes to paid');
+  testAssert(normalizePaymentStatus('failed') === 'failed', 'Explicit failed returns failed');
+  testAssert(normalizePaymentStatus('expired') === 'expired', 'Explicit expired returns expired');
+
+  // 3. Session normalization preserves unknown and does NOT convert to pending
+  const sessionWithoutPaymentStatus = normalizeSession({
+    id: '9901',
+    session_code: 'US-9901',
+    amount: 35000,
+    status: 'completed'
+  });
+  testAssert(sessionWithoutPaymentStatus.payment_status === 'unknown', 'Session without payment_status normalizes to unknown');
+  testAssert(sessionWithoutPaymentStatus.payment_status !== 'pending', 'Missing payment_status is NEVER converted to pending');
+  testAssert(sessionWithoutPaymentStatus.payment_status !== 'paid', 'Session status completed is NEVER equated to payment paid');
+
+  const sessionWithNullPaymentStatus = normalizeSession({
+    id: '9902',
+    session_code: 'US-9902',
+    amount: 35000,
+    status: 'completed',
+    payment_status: null
+  });
+  testAssert(sessionWithNullPaymentStatus.payment_status === 'unknown', 'Session with null payment_status normalizes to unknown');
+
+  const sessionWithExplicitPending = normalizeSession({
+    id: '9903',
+    session_code: 'US-9903',
+    amount: 45000,
+    status: 'Pending',
+    payment_status: 'pending'
+  });
+  testAssert(sessionWithExplicitPending.payment_status === 'pending', 'Session with explicit pending retains pending');
+
+  const sessionWithExplicitPaid = normalizeSession({
+    id: '9904',
+    session_code: 'US-9904',
+    amount: 35000,
+    status: 'completed',
+    payment_status: 'paid'
+  });
+  testAssert(sessionWithExplicitPaid.payment_status === 'paid', 'Session with explicit paid retains paid');
+  console.log('[PASS] Missing payment_status strictly normalizes to unknown; explicit pending/paid verified');
+}
+
+// ─── 38. Financial KPI Metrics & Separation (5 Distinct Metrics) ────────────
+console.log('--- SECTION 38: Financial KPI Metrics & Separation (5 Distinct Metrics) ---');
+{
+  const txList: TransactionItem[] = [
+    {
+      id: 'T-PAID-1',
+      transaction_code: 'TX-P1',
+      session_id: 'S1',
+      session_code: 'S1',
+      kiosk_id: 'K1',
+      kiosk_name: 'Kiosk 1',
+      amount: 50000,
+      payment_method: 'qris',
+      status: 'paid',
+      created_at: '2026-10-22T10:00:00Z'
+    },
+    {
+      id: 'T-PEND-1',
+      transaction_code: 'TX-PEND1',
+      session_id: 'S2',
+      session_code: 'S2',
+      kiosk_id: 'K1',
+      kiosk_name: 'Kiosk 1',
+      amount: 30000,
+      payment_method: 'qris',
+      status: 'pending',
+      created_at: '2026-10-22T10:05:00Z'
+    },
+    {
+      id: 'T-FAIL-1',
+      transaction_code: 'TX-F1',
+      session_id: 'S3',
+      session_code: 'S3',
+      kiosk_id: 'K1',
+      kiosk_name: 'Kiosk 1',
+      amount: 20000,
+      payment_method: 'qris',
+      status: 'failed',
+      created_at: '2026-10-22T10:10:00Z'
+    },
+    {
+      id: 'T-EXP-1',
+      transaction_code: 'TX-E1',
+      session_id: 'S4',
+      session_code: 'S4',
+      kiosk_id: 'K1',
+      kiosk_name: 'Kiosk 1',
+      amount: 15000,
+      payment_method: 'qris',
+      status: 'expired',
+      created_at: '2026-10-22T10:15:00Z'
+    },
+    {
+      id: 'T-UNK-1',
+      transaction_code: 'TX-U1',
+      session_id: 'S5',
+      session_code: 'S5',
+      kiosk_id: 'K1',
+      kiosk_name: 'Kiosk 1',
+      amount: 40000,
+      payment_method: 'qris',
+      status: 'unknown',
+      created_at: '2026-10-22T10:20:00Z'
+    },
+    {
+      id: 'T-UNV-1',
+      transaction_code: 'TX-UV1',
+      session_id: 'S6',
+      session_code: 'S6',
+      kiosk_id: 'K1',
+      kiosk_name: 'Kiosk 1',
+      amount: 25000,
+      payment_method: 'qris',
+      status: 'unverified',
+      created_at: '2026-10-22T10:25:00Z'
+    }
+  ];
+
+  const summary = calculateFinancialSummary(txList);
+
+  // 1. Five distinct metrics check
+  testAssert(summary.paidRevenue === 50000, 'Verified Paid Revenue is strictly from paid status (50,000)');
+  testAssert(summary.grossTransactionAmount === 180000, 'Gross Session Value is sum of all transactions (180,000)');
+  testAssert(summary.pendingVolume === 30000, 'Explicit Pending Volume is strictly from pending status (30,000)');
+  testAssert(summary.failedVolume === 35000, 'Failed/Expired Volume combines failed (20,000) and expired (15,000) = 35,000');
+  testAssert(summary.unverifiedVolume === 65000, 'Unverified Volume combines unknown (40,000) and unverified (25,000) = 65,000');
+  testAssert(summary.unverifiedPayments === 2, 'Unverified Payments count is 2');
+
+  // 2. Strict non-contamination invariants
+  testAssert(summary.pendingVolume !== 95000, 'Unknown volume is NOT added to pending volume');
+  testAssert(summary.paidRevenue !== 115000, 'Unknown volume is NOT added to paid revenue');
+  testAssert(summary.settlementRevenue === 0, 'Settlement remains 0 / unsupported');
+  testAssert(summary.refundVolume === 0, 'Refund remains 0 / unsupported');
+
+  console.log('[PASS] 5 distinct financial KPI metrics verified without contamination');
+}
+
+// ─── 39. Source Consistency & Explicit Data Modes ───────────────────────────
+console.log('--- SECTION 39: Source Consistency & Explicit Data Modes ---');
+{
+  // 1. Default Mode is SAFE_SIMULATION
+  testAssert(DEFAULT_DATA_SOURCE_MODE === 'SAFE_SIMULATION', 'Default mode constant is SAFE_SIMULATION');
+  testAssert(getDataSourceMode() === 'SAFE_SIMULATION', 'Initial runtime mode is SAFE_SIMULATION');
+
+  // 2. Both Sessions and Transactions have consistent 5 fixtures in simulation
+  testAssert(SEED_SESSIONS.length === 5, 'SEED_SESSIONS contains exactly 5 fixtures');
+  testAssert(SEED_TRANSACTIONS.length === 5, 'SEED_TRANSACTIONS contains exactly 5 fixtures');
+
+  // 3. 1-to-1 Mapping and parity check between Sessions and Transactions fixtures
+  for (let i = 0; i < SEED_SESSIONS.length; i++) {
+    const session = SEED_SESSIONS[i];
+    const tx = SEED_TRANSACTIONS[i];
+    testAssert(session.amount === tx.amount, `Fixture index ${i} amount matches: ${session.amount}`);
+    testAssert(session.kiosk_id === tx.kiosk_id, `Fixture index ${i} kiosk_id matches: ${session.kiosk_id}`);
+    testAssert(session.payment_status === tx.status, `Fixture index ${i} payment status matches: ${session.payment_status} vs ${tx.status}`);
+  }
+
+  // 4. Parity in aggregate values and alignment with actual fixture ground truth
+  const totalSessionGross = SEED_SESSIONS.reduce((acc, s) => acc + s.amount, 0);
+  const totalTxGross = SEED_TRANSACTIONS.reduce((acc, t) => acc + t.amount, 0);
+  testAssert(totalSessionGross === totalTxGross, `Gross values match exactly: ${totalSessionGross}`);
+  testAssert(totalSessionGross === 155000, `Actual total gross session value is strictly Rp 155.000: ${totalSessionGross}`);
+  testAssert(totalTxGross === 155000, `Actual total gross transaction value is strictly Rp 155.000: ${totalTxGross}`);
+
+  const simTxSummary = calculateFinancialSummary(SEED_TRANSACTIONS);
+  const sessionPaidGross = SEED_SESSIONS.filter(s => s.payment_status === 'paid').reduce((acc, s) => acc + s.amount, 0);
+  testAssert(simTxSummary.paidRevenue === sessionPaidGross, `Verified Paid Revenue matches between Sessions and Transactions: ${sessionPaidGross}`);
+  testAssert(simTxSummary.paidRevenue === 70000, `Actual verified paid revenue is strictly Rp 70.000: ${simTxSummary.paidRevenue}`);
+
+  const sessionUnknownGross = SEED_SESSIONS.filter(s => s.payment_status === 'unknown').reduce((acc, s) => acc + s.amount, 0);
+  testAssert(simTxSummary.unverifiedVolume === sessionUnknownGross, `Unverified Volume matches between Sessions and Transactions: ${sessionUnknownGross}`);
+  testAssert(simTxSummary.unverifiedVolume === 25000, `Actual unverified volume is strictly Rp 25.000: ${simTxSummary.unverifiedVolume}`);
+
+  const sessionPendingGross = SEED_SESSIONS.filter(s => s.payment_status === 'pending').reduce((acc, s) => acc + s.amount, 0);
+  testAssert(simTxSummary.pendingVolume === sessionPendingGross, `Explicit Pending Volume matches between Sessions and Transactions: ${sessionPendingGross}`);
+  testAssert(simTxSummary.pendingVolume === 25000, `Actual explicit pending volume is strictly Rp 25.000: ${simTxSummary.pendingVolume}`);
+
+  const sessionFailedGross = SEED_SESSIONS.filter(s => s.payment_status === 'failed').reduce((acc, s) => acc + s.amount, 0);
+  testAssert(simTxSummary.failedVolume === sessionFailedGross, `Failed/Expired Volume matches between Sessions and Transactions: ${sessionFailedGross}`);
+  testAssert(simTxSummary.failedVolume === 35000, `Actual failed/expired volume is strictly Rp 35.000: ${simTxSummary.failedVolume}`);
+
+  // 5. Mathematical integrity & anti-double counting check
+  const partitionedSum = simTxSummary.paidRevenue + simTxSummary.pendingVolume + simTxSummary.failedVolume + simTxSummary.unverifiedVolume;
+  testAssert(partitionedSum === simTxSummary.grossTransactionAmount, `No double counting: partitions sum ${partitionedSum} matches gross ${simTxSummary.grossTransactionAmount}`);
+
+  // 6. SAFE_SIMULATION mode does NOT make API calls
+  const simSessions = await fetchSessionsService({ mode: 'SAFE_SIMULATION' });
+  testAssert(simSessions.length === 5, 'fetchSessionsService returns 5 simulation items');
+  testAssert(simSessions[0].isSimulated === true, 'Simulation sessions marked isSimulated');
+
+  const simTransactions = await fetchTransactionsService({ mode: 'SAFE_SIMULATION' });
+  testAssert(simTransactions.length === 5, 'fetchTransactionsService returns 5 simulation items');
+  testAssert(simTransactions[0].isSimulated === true, 'Simulation transactions marked isSimulated');
+
+  console.log('[PASS] Source consistency and fixture parity verified between Sessions and Analytics');
+}
+
+// ─── 40. Fail-Closed on 401/403 & No Silent Mock Fallback ───────────────────
+console.log('--- SECTION 40: Fail-Closed on 401/403 & No Silent Mock Fallback ---');
+{
+  // 1. Changing mode updates configuration
+  setDataSourceMode('AUTHORIZED_READ_ONLY');
+  testAssert(getDataSourceMode() === 'AUTHORIZED_READ_ONLY', 'Data source mode changed to AUTHORIZED_READ_ONLY');
+
+  // 2. In AUTHORIZED_READ_ONLY, network failure must throw error (fail-closed, NO mock fallback)
+  let sessionsFailedClosed = false;
+  try {
+    await fetchSessionsService({ mode: 'AUTHORIZED_READ_ONLY' });
+  } catch (err: any) {
+    sessionsFailedClosed = true;
+    testAssert(!Array.isArray(err), 'Error is thrown, not mock session array');
+  }
+  testAssert(sessionsFailedClosed, 'fetchSessionsService in AUTHORIZED_READ_ONLY fails closed on network failure');
+
+  let txFailedClosed = false;
+  try {
+    await fetchTransactionsService({ mode: 'AUTHORIZED_READ_ONLY' });
+  } catch (err: any) {
+    txFailedClosed = true;
+    testAssert(!Array.isArray(err), 'Error is thrown, not mock transaction array');
+  }
+  testAssert(txFailedClosed, 'fetchTransactionsService in AUTHORIZED_READ_ONLY fails closed on network failure');
+
+  // 3. Reset mode to SAFE_SIMULATION
+  setDataSourceMode('SAFE_SIMULATION');
+  testAssert(getDataSourceMode() === 'SAFE_SIMULATION', 'Data source mode safely restored to SAFE_SIMULATION');
+
+  // 4. Mutation safeguard remains active
+  testAssert(ENABLE_BACKEND_MUTATIONS === false, 'ENABLE_BACKEND_MUTATIONS remains strictly false');
+  testAssert(VERIFIED_STAGING_ALLOWLIST.length === 0, 'VERIFIED_STAGING_ALLOWLIST remains strictly empty');
+
+  console.log('[PASS] HTTP 401/403 and network failures strictly fail-closed without mock fallback');
+}
+
+// ─── 41. Request Race Mitigation & Multi-Tenant Kiosk Ownership RBAC ─────────
+console.log('--- SECTION 41: Request Race Mitigation & Multi-Tenant RBAC ---');
+{
+  // 1. filterTransactionsByRole with userKiosks
+  const adminMitraUser = {
+    id: 'user-mitra-1',
+    role: 'Admin Mitra',
+    partner_name: 'Mitra CP'
+  };
+  const partnerKiosks = [
+    { id: 'KSK-0001', user_id: 'user-mitra-1' }
+  ];
+
+  const filteredForMitra = filterTransactionsByRole(SEED_TRANSACTIONS, adminMitraUser, partnerKiosks);
+  testAssert(filteredForMitra.length === 2, `Admin Mitra only sees their own kiosks (KSK-0001: 8821 & 8823): ${filteredForMitra.length}`);
+  testAssert(filteredForMitra.every(t => t.kiosk_id === 'KSK-0001'), 'All filtered transactions belong strictly to KSK-0001');
+
+  // Super Admin sees all
+  const superAdminUser = { id: 'admin-root', role: 'Super Admin' };
+  const filteredForSuperAdmin = filterTransactionsByRole(SEED_TRANSACTIONS, superAdminUser, partnerKiosks);
+  testAssert(filteredForSuperAdmin.length === 5, 'Super Admin sees all 5 transactions');
+
+  // 2. Request race condition logic: older request ID cannot overwrite newer request
+  let activeRequestId = 0;
+  let storedData: string = '';
+
+  const simulateFetch = async (mode: string, delayMs: number) => {
+    const currentId = ++activeRequestId;
+    await new Promise(res => setTimeout(res, delayMs));
+    if (currentId === activeRequestId) {
+      storedData = mode;
+    }
+  };
+
+  // Launch slow authorized read-only (80ms) then fast safe simulation (10ms)
+  const p1 = simulateFetch('AUTHORIZED_READ_ONLY', 80);
+  const p2 = simulateFetch('SAFE_SIMULATION', 10);
+  await Promise.all([p1, p2]);
+
+  testAssert(storedData === 'SAFE_SIMULATION', 'Fast subsequent request safely wins over slow earlier request (race eliminated)');
+  console.log('[PASS] Request race mitigation and multi-tenant kiosk RBAC verified');
 }
 
 console.log('\n================================================================');

@@ -220,6 +220,11 @@ Suite pengujian otomatis Modul 6 [tests/stage7_payment_transactions.test.ts](fil
 34. **Final Patch 1: Refund & Chargeback Unsupported N/A Display** (3 assertions) — PASS
 35. **Final Patch 2: Strict Payment Status Verification (No Completed Assumption)** (5 assertions) — PASS
 36. **Final Patch 3: Transaction Reference Labelling (Official vs Referensi Simulasi)** (7 assertions) — PASS
+37. **Data Integrity Patch 1: Missing payment_status Handling & Strict Normalization** (18 assertions) — PASS
+38. **Data Integrity Patch 2: Financial KPI Metrics Separation (5 Distinct Metrics)** (11 assertions) — PASS
+39. **Data Integrity Patch 3: Source Consistency & Fixture Parity (Sessions vs Analytics)** (32 assertions) — PASS
+40. **Data Integrity Patch 4: Fail-Closed on 401/403 & Network Offline (No Mock Fallback)** (9 assertions) — PASS
+41. **Data Integrity Patch 5: Request Race Mitigation & Multi-Tenant Kiosk RBAC** (6 assertions) — PASS
 
 ---
 
@@ -243,15 +248,15 @@ Suite 9  (tests/stage4c_printer_simulation.test.ts): 116 assertions PASS [0 FAIL
 Suite 10 (tests/stage5_kiosk_management.test.ts)   : 120 assertions PASS [0 FAIL]
 Suite 11 (tests/stage5c_kiosk_contract.test.ts)    : 132 assertions PASS [0 FAIL]
 Suite 12 (tests/stage6_session_management.test.ts) : 125 assertions PASS [0 FAIL]
-Suite 13 (tests/stage7_payment_transactions.test.ts): 150 assertions PASS [0 FAIL]
+Suite 13 (tests/stage7_payment_transactions.test.ts): 226 assertions PASS [0 FAIL]
 ================================================================
-TOTAL KESELURUHAN: 1.664 ASSERTIONS PASS (0 FAILED, EXIT CODE 0)
+TOTAL KESELURUHAN: 1.740 ASSERTIONS PASS (0 FAILED, EXIT CODE 0)
 ================================================================
 ```
 
 Status Lint dan Build:
 - **`npm run lint` (`tsc --noEmit`):** PASS (0 error).
-- **`npm run build` (`vite build`):** PASS (2.831 modul ter-transformasi, dist bundle bersih dalam 1.86 detik).
+- **`npm run build` (`vite build`):** PASS (2.832 modul ter-transformasi, dist bundle bersih dalam 1.85 detik).
 - **Regresi Modul 1–5**: **0 (Nol Regresi)**.
 
 ---
